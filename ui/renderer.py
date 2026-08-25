@@ -19,6 +19,9 @@ from utils.constants import (
     COLOR_BACKGROUND, COLOR_WOOD, COLOR_CUSHION, COLOR_FELT,
     COLOR_POCKET, COLOR_HEAD_STRING, COLOR_AIM_LINE, COLOR_SHADOW,
     COLOR_INVALID_GHOST, COLOR_TARGET_ARROW,
+    COLOR_RAIL_SIGHT, COLOR_POCKET_RIM,
+    RAIL_SIGHT_SIZE, FELT_EDGE_STEPS, FELT_EDGE_DARKEN,
+    WOOD_THICKNESS,
     AIM_LINE_DASH_LEN, AIM_LINE_GAP_LEN, AIM_LINE_ALPHA, GHOST_BALL_ALPHA,
     TARGET_ARROW_LEN,
     BALL_RADIUS, POCKET_VISUAL_RADIUS,
@@ -81,31 +84,31 @@ def draw_frame(
     )
     pygame.draw.rect(surface, COLOR_CUSHION, cushion_rect, border_radius=4)
 
-    # 4. Felt surface
+    # 4. Felt surface, darkened towards the cushions so the bed looks recessed
     pygame.draw.rect(surface, COLOR_FELT, table.felt_rect)
+    _draw_felt_shading(surface, table)
 
-    # 5. Pocket holes
+    # 5. Rail sights (the ivory diamonds players aim off)
+    _draw_rail_sights(surface, table)
+
+    # 6. Pocket holes
     for pocket in table.pockets:
-        pygame.draw.circle(
-            surface, COLOR_POCKET,
-            pocket.pos.to_int_tuple(),
-            pocket.visual_radius,
-        )
+        _draw_pocket(surface, pocket)
 
-    # 6. Head string  (dashed vertical line — marks ball-in-hand zone on break)
+    # 7. Head string  (dashed vertical line — marks ball-in-hand zone on break)
     _draw_head_string(surface, table)
 
-    # 7. Ball shadows (drawn before balls so shadows sit "under" them)
+    # 8. Ball shadows (drawn before balls so shadows sit "under" them)
     for ball in balls:
         if not ball.pocketed:
             _draw_ball_shadow(surface, ball)
 
-    # 8. Balls
+    # 9. Balls
     for ball in balls:
         if not ball.pocketed:
             _draw_ball(surface, ball)
 
-    # 9. Aiming line and cue stick (only in aiming state)
+    # 10. Aiming line and cue stick (only in aiming state)
     aiming = state_name in ("PLAYER_AIMING", "BREAK_SHOT")
     if aiming and cue.visible:
         # Find the cue ball
@@ -114,7 +117,7 @@ def draw_frame(
             _draw_aim_line(surface, cue_ball, cue, balls, table)
             cue.draw(surface, cue_ball.pos)
 
-    # 10. Ghost cue ball for ball-in-hand placement
+    # 11. Ghost cue ball for ball-in-hand placement
     if ball_in_hand:
         color = (200, 50, 50) if not placement_valid else (240, 240, 240)
         alpha_surf = pygame.Surface((BALL_RADIUS * 2 + 4, BALL_RADIUS * 2 + 4), pygame.SRCALPHA)
@@ -129,6 +132,70 @@ def draw_frame(
 # ---------------------------------------------------------------------------
 # Table decorations
 # ---------------------------------------------------------------------------
+
+def _draw_felt_shading(surface: pygame.Surface, table: Table) -> None:
+    """Darken the felt towards the cushions.
+
+    Drawn as nested one-pixel outlines stepping from a dark edge back up to
+    the felt colour. That keeps it to a handful of cheap rect calls per frame
+    with no per-frame alpha surfaces, while giving the bed a recessed look.
+    """
+    for i in range(FELT_EDGE_STEPS):
+        # t = 0 at the outermost ring, 1 where it meets the open felt
+        t     = i / float(FELT_EDGE_STEPS)
+        blend = FELT_EDGE_DARKEN + (1.0 - FELT_EDGE_DARKEN) * t
+        shade = tuple(int(channel * blend) for channel in COLOR_FELT)
+        pygame.draw.rect(surface, shade, table.felt_rect.inflate(-2 * i, -2 * i), 1)
+
+
+def _draw_rail_sights(surface: pygame.Surface, table: Table) -> None:
+    """Draw the diamonds inlaid in the rails.
+
+    Long rails carry six, three either side of the centre pocket; short rails
+    carry three. Positions follow the eighths and quarters of the playing
+    surface the way a real table is marked.
+    """
+    felt = table.felt_rect
+    half = WOOD_THICKNESS / 2.0
+
+    # Centre line of each rail, out on the wood beyond the cushion band
+    rail_top    = table.wood_rect.top    + half
+    rail_bottom = table.wood_rect.bottom - half
+    rail_left   = table.wood_rect.left   + half
+    rail_right  = table.wood_rect.right  - half
+
+    # Long rails: eighths, skipping the middle where the side pocket sits
+    for k in (1, 2, 3, 5, 6, 7):
+        x = felt.left + felt.width * k / 8.0
+        _draw_diamond(surface, x, rail_top)
+        _draw_diamond(surface, x, rail_bottom)
+
+    # Short rails: quarters
+    for k in (1, 2, 3):
+        y = felt.top + felt.height * k / 4.0
+        _draw_diamond(surface, rail_left,  y)
+        _draw_diamond(surface, rail_right, y)
+
+
+def _draw_diamond(surface: pygame.Surface, x: float, y: float) -> None:
+    """Draw one rail sight centred on (x, y)."""
+    s  = RAIL_SIGHT_SIZE
+    cx = int(x)
+    cy = int(y)
+    pygame.draw.polygon(
+        surface, COLOR_RAIL_SIGHT,
+        [(cx, cy - s), (cx + s, cy), (cx, cy + s), (cx - s, cy)],
+    )
+
+
+def _draw_pocket(surface: pygame.Surface, pocket) -> None:
+    """Draw a pocket as a rimmed hole rather than a flat black disc."""
+    centre = pocket.pos.to_int_tuple()
+    r      = int(pocket.visual_radius)
+    # Rim first, slightly wider, so the hole reads as cut into the surface
+    pygame.draw.circle(surface, COLOR_POCKET_RIM, centre, r + 3)
+    pygame.draw.circle(surface, COLOR_POCKET,     centre, r)
+
 
 def _draw_head_string(surface: pygame.Surface, table: Table) -> None:
     """Draw a dashed vertical line at the head string position."""

@@ -16,7 +16,10 @@ FPS      = 60          # Target frames per second
 # Wood border surrounds the cushions.
 # ---------------------------------------------------------------------------
 TABLE_OFFSET_X       = 110   # Left edge of felt from window left
-TABLE_OFFSET_Y       = 115   # Top edge of felt from window top
+TABLE_OFFSET_Y       = 160   # Top edge of felt from window top.
+                             # Centres the table in the band left between the
+                             # HUD strip and the power bar: at 115 the wooden
+                             # rail started at y=65 and ran under the HUD.
 TABLE_W              = 1060  # Felt width  (2 : 1 ratio with TABLE_H)
 TABLE_H              = 530   # Felt height
 CUSHION_THICKNESS    = 30    # Cushion band width (pixels)
@@ -83,6 +86,15 @@ COLOR_FOUL_OVERLAY= (180, 40,  40)
 COLOR_WIN_OVERLAY = (40,  160, 80)
 COLOR_INVALID_GHOST = (200, 50, 50)   # Red ghost for invalid ball-in-hand
 COLOR_TARGET_ARROW  = (255, 225, 90)  # Where the struck ball will travel
+COLOR_RAIL_SIGHT    = (228, 220, 196)  # Ivory diamonds inlaid in the rails
+COLOR_POCKET_RIM    = (24,  30,  24)   # Rim that gives the pocket its depth
+
+# ---------------------------------------------------------------------------
+# Table dressing
+# ---------------------------------------------------------------------------
+RAIL_SIGHT_SIZE     = 5     # Half-width of a rail diamond, in pixels
+FELT_EDGE_STEPS     = 8     # Nested outlines that darken the felt at the rails
+FELT_EDGE_DARKEN    = 0.55  # How dark the outermost felt edge goes (0-1)
 
 # Ball colours indexed by ball number (0 = cue ball = white)
 BALL_COLORS = {
