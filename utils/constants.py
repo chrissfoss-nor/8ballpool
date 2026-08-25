@@ -38,7 +38,15 @@ BALL_RADIUS = 14   # pixels — all balls the same size
 # Physics
 # ---------------------------------------------------------------------------
 NUM_SUBSTEPS       = 4      # Physics sub-steps per frame (stability)
-GRAVITY            = 980.0  # px/s² (scaled to table pixel dimensions)
+
+# Gravity has to be expressed in the same length unit as everything else the
+# physics touches, which is pixels. TABLE_W spans the 2.54 m playing surface
+# of a 9-foot table, so that conversion is what sets the scale. Hard-coding
+# 980 here -- g in cm/s² -- made every friction deceleration roughly four
+# times too weak, and balls took eleven seconds to settle after an ordinary
+# shot.
+PIXELS_PER_METRE   = TABLE_W / 2.54          # ≈ 417 px/m
+GRAVITY            = 9.81 * PIXELS_PER_METRE # px/s²
 
 # Friction coefficients (multiplied by GRAVITY to get deceleration in px/s²)
 FRICTION_SLIDING   = 0.20   # Kinetic/sliding friction just after cue hit
