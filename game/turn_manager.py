@@ -42,22 +42,24 @@ class Player:
     # Helpers
     # ------------------------------------------------------------------
 
-    def balls_remaining(self) -> int:
-        """How many balls of this player's group are still on the table.
+    def balls_remaining(self, all_balls) -> int:
+        """How many balls of this player's group are still on the table."""
+        if self.group not in (BallGroup.SOLID, BallGroup.STRIPE):
+            return 0
+        return sum(1 for b in all_balls
+                   if b.group == self.group and not b.pocketed)
 
-        This is computed relative to the group size (7 balls per group),
-        not against the live ball list — the rules engine does that check
-        directly against the Ball objects.
+    def has_cleared_group(self, all_balls) -> bool:
+        """True once no ball of this player's group is left on the table.
+
+        Read off the table rather than off pocketed_balls. A ball the
+        opponent pockets for you stays down and still clears your group;
+        counting only your own pots left such a player permanently short of
+        seven, so they could never legally play the 8 ball and never win.
         """
-        if self.group in (BallGroup.SOLID, BallGroup.STRIPE):
-            return 7 - len(self.pocketed_balls)
-        return 0
-
-    def has_cleared_group(self) -> bool:
-        """True once all 7 balls of the player's group have been pocketed."""
-        if self.group in (BallGroup.SOLID, BallGroup.STRIPE):
-            return len(self.pocketed_balls) >= 7
-        return False
+        if self.group not in (BallGroup.SOLID, BallGroup.STRIPE):
+            return False
+        return self.balls_remaining(all_balls) == 0
 
     def record_pocket(self, ball_number: int) -> None:
         """Record that this player legally pocketed *ball_number*."""

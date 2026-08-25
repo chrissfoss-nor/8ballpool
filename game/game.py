@@ -378,9 +378,9 @@ class Game:
         # Assign ball groups if needed
         if result.groups_assigned:
             self.turns.assign_groups(result.current_group)
-            # Record legally pocketed balls for current player
-        # Record pocketed balls for the appropriate player
-        self._record_pocketed_balls(result)
+
+        # Refresh both players' pocketed lists from the table
+        self._sync_pocketed_balls()
 
         # Handle special break case: 8-ball pocketed → re-rack
         if result.is_foul and "re-racking" in result.foul_reason:
@@ -423,26 +423,23 @@ class Game:
         self.cue.visible = True
         self._transition(GameState.PLAYER_AIMING)
 
-    def _record_pocketed_balls(self, result) -> None:
-        """Credit legally pocketed balls to the correct player."""
-        current  = self.turns.current
-        opponent = self.turns.opponent
+    def _sync_pocketed_balls(self) -> None:
+        """Recompute each player's pocketed list from the table.
 
-        for ball in result.pocketed_this_shot:
-            if ball.is_cue_ball or ball.number == 8:
+        Which list a ball lands in is decided by who owns its group, not by
+        who struck it: a ball your opponent pockets for you stays down and
+        still counts as one of yours. Rebuilding from the table each time
+        also picks up balls potted on the break, which go down before either
+        group has been assigned.
+        """
+        for player in self.turns.players:
+            if player.group == BallGroup.NONE:
+                player.pocketed_balls = []
                 continue
-            # After group assignment, credit own-group balls to current player
-            if current.group != BallGroup.NONE and ball.group == current.group:
-                current.record_pocket(ball.number)
-            elif opponent.group != BallGroup.NONE and ball.group == opponent.group:
-                # Opponent's ball pocketed by current player — still counts for opponent
-                # (only "own" pockets count; we don't award opponent credit here —
-                #  the ball is just removed from the table and the foul check handles it)
-                pass
-            elif current.group == BallGroup.NONE and result.groups_assigned:
-                # Groups just assigned on this shot
-                if ball.group == result.current_group:
-                    current.record_pocket(ball.number)
+            player.pocketed_balls = sorted(
+                ball.number for ball in self.balls
+                if ball.pocketed and ball.group == player.group
+            )
 
     # ==========================================================================
     # State transitions

@@ -186,7 +186,8 @@ class RulesEngine:
         # ------------------------------------------------------------------
         if eight_pocketed:
             return self._evaluate_eight_ball_pocket(
-                result, current, engine.first_contact_ball, engine.cushion_contacted
+                result, current, engine.first_contact_ball,
+                engine.cushion_contacted, all_balls,
             )
 
         # ------------------------------------------------------------------
@@ -203,7 +204,7 @@ class RulesEngine:
         # ------------------------------------------------------------------
         if engine.first_contact_ball is not None:
             wrong = self._is_wrong_first_contact(
-                engine.first_contact_ball, current
+                engine.first_contact_ball, current, all_balls
             )
             if wrong:
                 result.is_foul    = True
@@ -286,11 +287,12 @@ class RulesEngine:
         current_player,
         first_contact    : Optional[Ball],
         cushion_contacted: bool,
+        all_balls        : List[Ball],
     ) -> ShotResult:
         """Handle the case where ball 8 was pocketed (and no scratch)."""
 
         # Check if player has cleared their group
-        if not current_player.has_cleared_group():
+        if not current_player.has_cleared_group(all_balls):
             # Pocketed 8-ball too early → instant loss
             result.is_foul    = True
             result.is_loss    = True
@@ -317,7 +319,7 @@ class RulesEngine:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _is_wrong_first_contact(first_ball: Ball, current_player) -> bool:
+    def _is_wrong_first_contact(first_ball: Ball, current_player, all_balls) -> bool:
         """Return True if the cue ball's first contact was illegal.
 
         Legal first contacts:
@@ -331,7 +333,7 @@ class RulesEngine:
                 return True
             return False   # Any other first contact is legal
 
-        if current_player.has_cleared_group():
+        if current_player.has_cleared_group(all_balls):
             # Must hit the 8-ball first when going for the win
             return first_ball.number != 8
 
