@@ -70,10 +70,22 @@ python main.py
 ├── physics/             # Ball motion, collision resolution, pocket detection
 ├── entities/            # Ball, Table, Pocket, Cue data objects
 ├── ui/                  # Renderer, HUD, overlays
-└── utils/               # Vec2 math helper, all constants
+├── utils/               # Vec2 math helper, all constants
+└── tests/               # Rule and end-to-end regression tests
 ```
 
 Each folder has its own `README.md` with detailed documentation.
+
+---
+
+## Tests
+
+No test framework is required — each file runs on its own:
+
+```bash
+python tests/test_rules.py      # rack layout and group-clearing rules
+python tests/test_game_end.py   # winning and losing a game, end to end
+```
 
 ---
 
