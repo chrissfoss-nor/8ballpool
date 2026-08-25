@@ -18,8 +18,9 @@ from utils.vector   import Vec2
 from utils.constants import (
     COLOR_BACKGROUND, COLOR_WOOD, COLOR_CUSHION, COLOR_FELT,
     COLOR_POCKET, COLOR_HEAD_STRING, COLOR_AIM_LINE, COLOR_SHADOW,
-    COLOR_INVALID_GHOST,
+    COLOR_INVALID_GHOST, COLOR_TARGET_ARROW,
     AIM_LINE_DASH_LEN, AIM_LINE_GAP_LEN, AIM_LINE_ALPHA, GHOST_BALL_ALPHA,
+    TARGET_ARROW_LEN,
     BALL_RADIUS, POCKET_VISUAL_RADIUS,
     TABLE_OFFSET_X, TABLE_OFFSET_Y, TABLE_W, TABLE_H, CUSHION_THICKNESS,
     BALL_COLORS,
@@ -258,21 +259,24 @@ def _draw_aim_line(
     # Draw dashed line from cue ball to hit position
     _draw_dashed_line(surface, origin, hit_pos, AIM_LINE_ALPHA)
 
-    # If we hit a ball: draw a ghost of it and a deflection arrow
+    # If we hit a ball: show where the cue ball stops and where the object
+    # ball leaves.
     if hit_ball:
         _draw_ghost_ball(surface, hit_ball, hit_pos)
-        # Direction the hit ball would travel (along collision normal)
-        n = (hit_pos - hit_ball.pos)
+        # A struck ball leaves along the line of centres, heading away from
+        # the cue ball's contact position -- not back towards it.
+        n = (hit_ball.pos - hit_pos)
         dist = n.length()
         if dist > 0.01:
             n = n / dist
-            end = Vec2(hit_ball.pos.x + n.x * 60, hit_ball.pos.y + n.y * 60)
+            end = Vec2(hit_ball.pos.x + n.x * TARGET_ARROW_LEN,
+                       hit_ball.pos.y + n.y * TARGET_ARROW_LEN)
             pygame.draw.line(
                 surface,
-                (255, 230, 100, 120),
+                COLOR_TARGET_ARROW,
                 hit_ball.pos.to_int_tuple(),
                 end.to_int_tuple(),
-                1,
+                2,
             )
 
 
@@ -396,10 +400,16 @@ def _draw_ghost_ball(
     ball     : Ball,
     impact   : Vec2,
 ) -> None:
-    """Draw a semi-transparent ghost of *ball* at *impact* position."""
+    """Draw the cue ball's contact position as a translucent white ghost.
+
+    The ghost marks where the *cue* ball sits at the moment of contact, so
+    it is drawn white and outlined rather than in the target ball's colour --
+    tinting it like the object ball made it read as a second object ball.
+    """
     r    = int(ball.radius)
-    size = r * 2 + 2
+    size = r * 2 + 4
     surf = pygame.Surface((size, size), pygame.SRCALPHA)
-    pygame.draw.circle(surf, (*ball.color, GHOST_BALL_ALPHA), (r + 1, r + 1), r)
-    pygame.draw.circle(surf, (255, 255, 255, 40), (r + 1, r + 1), r, 1)
-    surface.blit(surf, (int(impact.x) - r - 1, int(impact.y) - r - 1))
+    centre = (r + 2, r + 2)
+    pygame.draw.circle(surf, (255, 255, 255, GHOST_BALL_ALPHA), centre, r)
+    pygame.draw.circle(surf, (255, 255, 255, 200), centre, r, 1)
+    surface.blit(surf, (int(impact.x) - r - 2, int(impact.y) - r - 2))

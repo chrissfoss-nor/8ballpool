@@ -82,6 +82,7 @@ COLOR_TURN_ARROW  = (255, 210, 50)
 COLOR_FOUL_OVERLAY= (180, 40,  40)
 COLOR_WIN_OVERLAY = (40,  160, 80)
 COLOR_INVALID_GHOST = (200, 50, 50)   # Red ghost for invalid ball-in-hand
+COLOR_TARGET_ARROW  = (255, 225, 90)  # Where the struck ball will travel
 
 # Ball colours indexed by ball number (0 = cue ball = white)
 BALL_COLORS = {
@@ -128,4 +129,5 @@ RACK_BALL_SPACING   = BALL_RADIUS * 2 + 1   # Tiny gap prevents overlap explosio
 AIM_LINE_DASH_LEN   = 12    # Length of each dash segment in the aim line
 AIM_LINE_GAP_LEN    = 6     # Gap between dashes
 AIM_LINE_ALPHA      = 140   # 0-255 transparency of aim line
-GHOST_BALL_ALPHA    = 80    # Transparency of the ghost-ball on target
+GHOST_BALL_ALPHA    = 110   # Transparency of the ghost cue ball at contact
+TARGET_ARROW_LEN    = 60    # Length of the object-ball direction arrow
