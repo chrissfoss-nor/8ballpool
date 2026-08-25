@@ -566,20 +566,20 @@ def _compute_rack_positions(foot_x: float, foot_y: float) -> list:
     Balls are spaced RACK_BALL_SPACING apart edge-to-edge.
     """
     import math as _math
-    spacing = RACK_BALL_SPACING                 # centre-to-centre distance
-    row_dx  = spacing                           # rows progress left→right
-    row_dy  = spacing * _math.sin(_math.pi / 3) # 60° triangle height
+    spacing = RACK_BALL_SPACING                  # centre-to-centre distance
+    # In a tight triangle the rows step sideways by the 60° triangle height,
+    # not by a full ball width -- that is what makes neighbouring rows touch.
+    row_dx  = spacing * _math.sin(_math.pi / 3)  # horizontal step between rows
+    row_dy  = spacing                            # vertical step within a row
 
     positions = []
     for row in range(5):          # rows 0..4 (apex = row 0)
         num_in_row = row + 1
-        # Centre of this row is offset from apex
-        row_x    = foot_x + row * row_dx
-        row_start_y = foot_y - (num_in_row - 1) * spacing / 2
+        # Each row is centred on the foot line and pushed one step further back
+        row_x       = foot_x + row * row_dx
+        row_start_y = foot_y - (num_in_row - 1) * row_dy / 2
         for col in range(num_in_row):
-            x = row_x
-            y = row_start_y + col * spacing
-            positions.append((x, y))
+            positions.append((row_x, row_start_y + col * row_dy))
 
     return positions   # 15 positions total
 
