@@ -215,25 +215,19 @@ def _draw_ball_number(
     cy     : int,
     r      : float,
 ) -> None:
-    """Draw the ball number centered on the ball, rotated with ball.spin."""
+    """Draw the ball number upright, on the white disc a real ball carries it on."""
     from ui.assets import get_bold_font
-    font_size = max(8, int(r * 1.1))
+
+    # A real ball wears its number in a white circular patch. Drawing that
+    # patch keeps the digits readable on a black 8 ball and over a stripe
+    # band alike, so the numeral needs only one colour.
+    disc_r = max(3, int(r * 0.58))
+    pygame.draw.circle(surface, (248, 248, 248), (cx, cy), disc_r)
+
+    font_size = max(8, int(r * 0.95))
     font      = get_bold_font(font_size)
-
-    # Choose text color: white on dark balls, black on light/stripe balls
-    if ball.is_stripe:
-        text_color = (20, 20, 20)
-    elif sum(ball.color) < 350:
-        text_color = (230, 230, 230)   # light text on dark ball
-    else:
-        text_color = (20, 20, 20)       # dark text on light ball
-
-    label = str(ball.number)
-    txt_surf = font.render(label, True, text_color)
-    # Rotate the text surface by the current spin angle (visual roll)
-    rotated  = pygame.transform.rotate(txt_surf, -math.degrees(ball.spin))
-    txt_rect = rotated.get_rect(center=(cx, cy))
-    surface.blit(rotated, txt_rect)
+    txt_surf  = font.render(str(ball.number), True, (25, 25, 25))
+    surface.blit(txt_surf, txt_surf.get_rect(center=(cx, cy)))
 
 
 # ---------------------------------------------------------------------------
