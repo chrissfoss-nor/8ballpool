@@ -173,7 +173,7 @@ def draw_break_prompt(surface: pygame.Surface, player_name: str) -> None:
         lines=[
             f"{player_name} breaks first.",
             "Aim and left-click to shoot.",
-            "Scroll wheel / right-drag to set power.",
+            "Scroll, keys, right-drag, or power bar to set power.",
         ],
         title_size=32,
         line_size=18,

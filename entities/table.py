@@ -25,7 +25,6 @@ from utils.vector import Vec2
 from utils.constants import (
     TABLE_OFFSET_X, TABLE_OFFSET_Y, TABLE_W, TABLE_H,
     CUSHION_THICKNESS, WOOD_THICKNESS,
-    POCKET_VISUAL_RADIUS,
 )
 from entities.pocket import Pocket
 
@@ -133,19 +132,18 @@ def create_table() -> Table:
     )
 
     # Pocket positions — corners sit just inside the cushion band
-    pr = POCKET_VISUAL_RADIUS   # shorthand
     fx = float(felt_rect.left)
     fy = float(felt_rect.top)
     fw = float(felt_rect.width)
     fh = float(felt_rect.height)
 
     pockets = [
-        Pocket(Vec2(fx,        fy),        label="TL"),   # top-left
-        Pocket(Vec2(fx + fw/2, fy - pr),   label="TM"),   # top-mid
-        Pocket(Vec2(fx + fw,   fy),        label="TR"),   # top-right
-        Pocket(Vec2(fx,        fy + fh),   label="BL"),   # bottom-left
-        Pocket(Vec2(fx + fw/2, fy + fh + pr), label="BM"),# bottom-mid
-        Pocket(Vec2(fx + fw,   fy + fh),   label="BR"),   # bottom-right
+        Pocket(Vec2(fx,        fy),            label="TL", kind="corner"),
+        Pocket(Vec2(fx + fw/2, fy),            label="TM", kind="side"),
+        Pocket(Vec2(fx + fw,   fy),            label="TR", kind="corner"),
+        Pocket(Vec2(fx,        fy + fh),        label="BL", kind="corner"),
+        Pocket(Vec2(fx + fw/2, fy + fh),       label="BM", kind="side"),
+        Pocket(Vec2(fx + fw,   fy + fh),        label="BR", kind="corner"),
     ]
 
     return Table(

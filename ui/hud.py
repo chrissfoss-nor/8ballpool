@@ -28,6 +28,22 @@ from ui.assets import draw_text_centered, get_bold_font, get_font
 PANEL_W       = 300    # Width of each player panel
 PANEL_MARGIN  = 20     # Margin from window edge
 PANEL_H       = HUD_HEIGHT - 10   # Panel height
+POWER_BAR_TRACK_H = 16
+
+
+def get_power_bar_track_rect() -> pygame.Rect:
+    """Return the exact fill track used for pointer-based power input."""
+    bar_y = WINDOW_H - POWER_BAR_HEIGHT + (POWER_BAR_HEIGHT - POWER_BAR_TRACK_H) // 2
+    bar_x = (WINDOW_W - POWER_BAR_W) // 2
+    return pygame.Rect(bar_x, bar_y, POWER_BAR_W, POWER_BAR_TRACK_H)
+
+
+def get_power_bar_hit_rect() -> pygame.Rect:
+    """Return a slightly larger hit target around the power bar track."""
+    return get_power_bar_track_rect().inflate(
+        POWER_BAR_BORDER * 2 + 16,
+        POWER_BAR_HEIGHT - POWER_BAR_TRACK_H,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -201,12 +217,18 @@ def _draw_turn_arrow(surface: pygame.Surface, current_player: int) -> None:
 
 def _draw_power_bar(surface: pygame.Surface, power: float) -> None:
     """Draw the horizontal shot-power bar at the bottom of the screen."""
-    bar_y   = WINDOW_H - POWER_BAR_HEIGHT + (POWER_BAR_HEIGHT - 16) // 2
-    bar_x   = (WINDOW_W - POWER_BAR_W) // 2
+    track   = get_power_bar_track_rect()
+    bar_y   = track.y
+    bar_x   = track.x
     b       = POWER_BAR_BORDER
 
     # Background
-    bg_rect = pygame.Rect(bar_x - b, bar_y - b, POWER_BAR_W + b * 2, 16 + b * 2)
+    bg_rect = pygame.Rect(
+        bar_x - b,
+        bar_y - b,
+        POWER_BAR_W + b * 2,
+        POWER_BAR_TRACK_H + b * 2,
+    )
     pygame.draw.rect(surface, COLOR_POWER_BAR_BG, bg_rect, border_radius=3)
 
     # Fill
@@ -216,7 +238,7 @@ def _draw_power_bar(surface: pygame.Surface, power: float) -> None:
         r = int(min(255, power * 510))
         g = int(min(255, (1.0 - power) * 510))
         fill_color = (r, g, 30)
-        fill_rect  = pygame.Rect(bar_x, bar_y, fill_w, 16)
+        fill_rect  = pygame.Rect(bar_x, bar_y, fill_w, POWER_BAR_TRACK_H)
         pygame.draw.rect(surface, fill_color, fill_rect, border_radius=2)
 
     # Border
@@ -224,8 +246,8 @@ def _draw_power_bar(surface: pygame.Surface, power: float) -> None:
 
     # Label
     label_x = bar_x - 60
-    draw_text_centered(surface, "POWER", 13, label_x, bar_y + 8, color=COLOR_TEXT)
+    draw_text_centered(surface, "POWER", 13, label_x, bar_y + POWER_BAR_TRACK_H // 2, color=COLOR_TEXT)
 
     # Percentage
     draw_text_centered(surface, f"{int(power * 100)}%", 13,
-                       bar_x + POWER_BAR_W + 30, bar_y + 8, color=COLOR_TEXT)
+                       bar_x + POWER_BAR_W + 30, bar_y + POWER_BAR_TRACK_H // 2, color=COLOR_TEXT)

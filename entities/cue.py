@@ -17,7 +17,7 @@ import pygame
 from utils.vector import Vec2
 from utils.constants import (
     MAX_SHOT_IMPULSE, MIN_SHOT_IMPULSE,
-    POWER_DRAG_DISTANCE,
+    POWER_DRAG_DISTANCE, POWER_SCROLL_STEP,
     CUE_LENGTH, CUE_WIDTH_BASE, CUE_WIDTH_TIP, CUE_GAP_BASE, CUE_GAP_POWER,
     COLOR_WOOD, COLOR_TEXT,
 )
@@ -63,7 +63,15 @@ class Cue:
 
         *direction* is +1 for scroll-up (more power) and -1 for scroll-down.
         """
-        self.power = max(0.0, min(1.0, self.power + direction * 0.05))
+        self.adjust_power(direction * POWER_SCROLL_STEP)
+
+    def set_power(self, value: float):
+        """Set shot power, clamped to the valid [0, 1] range."""
+        self.power = max(0.0, min(1.0, value))
+
+    def adjust_power(self, delta: float):
+        """Nudge shot power by *delta*, clamped to the valid [0, 1] range."""
+        self.set_power(self.power + delta)
 
     def start_drag(self, mouse_pos: tuple):
         """Begin a right-click drag to adjust power."""
@@ -85,7 +93,7 @@ class Cue:
         # Project drag onto the *backwards* direction to get pull distance
         pull = -drag_vec.dot(shot_dir)
         delta_power = pull / POWER_DRAG_DISTANCE
-        self.power = max(0.0, min(1.0, self._drag_start_power + delta_power))
+        self.set_power(self._drag_start_power + delta_power)
 
     def end_drag(self):
         """End the right-click drag."""

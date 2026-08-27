@@ -26,13 +26,36 @@ CUSHION_THICKNESS    = 30    # Cushion band width (pixels)
 WOOD_THICKNESS       = 20    # Wood border beyond cushion
 
 # Pocket sizes
-POCKET_VISUAL_RADIUS    = 18   # Drawn circle radius
-POCKET_COLLISION_RADIUS = 22   # Physics detection radius (slightly larger)
+# WPA-style pocket mouths are specified relative to a 2.25" pool ball:
+# corners are about 4.5" wide, side pockets about 5.0" wide.  The pixel
+# openings below are derived from BALL_RADIUS so table feel stays in scale.
 
 # ---------------------------------------------------------------------------
 # Ball
 # ---------------------------------------------------------------------------
 BALL_RADIUS = 14   # pixels — all balls the same size
+BALL_DIAMETER = BALL_RADIUS * 2
+
+STANDARD_BALL_DIAMETER_IN = 2.25
+STANDARD_CORNER_POCKET_MOUTH_IN = 4.50
+STANDARD_SIDE_POCKET_MOUTH_IN   = 5.00
+
+POCKET_CORNER_MOUTH_WIDTH = BALL_DIAMETER * (
+    STANDARD_CORNER_POCKET_MOUTH_IN / STANDARD_BALL_DIAMETER_IN
+)
+POCKET_SIDE_MOUTH_WIDTH = BALL_DIAMETER * (
+    STANDARD_SIDE_POCKET_MOUTH_IN / STANDARD_BALL_DIAMETER_IN
+)
+POCKET_CAPTURE_MARGIN = BALL_RADIUS * 0.20
+
+POCKET_CORNER_VISUAL_RADIUS = POCKET_CORNER_MOUTH_WIDTH / 2.0
+POCKET_SIDE_VISUAL_RADIUS   = POCKET_SIDE_MOUTH_WIDTH / 2.0
+POCKET_CORNER_COLLISION_RADIUS = POCKET_CORNER_VISUAL_RADIUS + POCKET_CAPTURE_MARGIN
+POCKET_SIDE_COLLISION_RADIUS   = POCKET_SIDE_VISUAL_RADIUS + POCKET_CAPTURE_MARGIN
+
+# Backwards-compatible aliases for modules that only need a generic value.
+POCKET_VISUAL_RADIUS    = POCKET_CORNER_VISUAL_RADIUS
+POCKET_COLLISION_RADIUS = POCKET_CORNER_COLLISION_RADIUS
 
 # ---------------------------------------------------------------------------
 # Physics
@@ -64,7 +87,8 @@ RESTITUTION_CUSHION = 0.75  # Cushion absorbs more energy
 # Cue / shot
 # ---------------------------------------------------------------------------
 MAX_SHOT_IMPULSE    = 2200.0  # px/s at full power (1.0)
-MIN_SHOT_IMPULSE    = 80.0    # px/s at minimum power (anything > 0)
+MIN_SHOT_IMPULSE    = 0.0     # px/s at zero power
+POWER_SCROLL_STEP   = 0.05    # power delta per wheel notch / key press
 POWER_DRAG_DISTANCE = 200     # pixels of right-click drag = full power
 CUE_LENGTH          = 260     # px — visual length of the cue stick
 CUE_WIDTH_BASE      = 7       # px — thick end width

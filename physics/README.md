@@ -9,7 +9,7 @@ The simulation engine — handles all ball motion, collision detection/response,
 | `engine.py` | `PhysicsEngine` — master update loop. Runs `NUM_SUBSTEPS` sub-steps per frame. Tracks shot-level state (`first_contact_ball`, `cushion_contacted`, `pocketed_this_shot`) and signals `all_stationary` when all balls stop. |
 | `friction.py` | `apply_friction(ball, dt)` — two-phase friction model: high sliding deceleration right after cue impact, low rolling deceleration at lower speeds. Updates visual spin angle. |
 | `ball_collision.py` | `resolve_pair(a, b)` — elastic ball-ball collision with restitution (e=0.96) and positional correction to prevent overlap sinking. |
-| `cushion_collision.py` | `resolve_cushions_and_pockets(ball, table)` — axis-aligned wall reflections with cushion restitution (e=0.75); pocket detection runs first and takes priority. |
+| `cushion_collision.py` | `resolve_cushions_and_pockets(ball, table)` — axis-aligned wall reflections with cushion restitution (e=0.75), standard-sized pocket mouth gaps, jaw collisions, and pocket detection. |
 
 ## Physics parameters (tunable in `utils/constants.py`)
 

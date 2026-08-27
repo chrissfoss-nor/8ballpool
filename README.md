@@ -6,7 +6,7 @@ A local two-player 8-ball pool game written in Python with Pygame.
 
 - **Realistic physics** — elastic ball-ball collisions, cushion reflections with energy loss, two-phase rolling/sliding friction
 - **Full 8-ball rules** — break rules, solid/stripe group assignment, all foul types, win/loss conditions
-- **Mouse-driven controls** — aim with the mouse, set power with scroll wheel or right-click drag, left-click to shoot
+- **Mouse-driven controls** — aim with the mouse, set power with scroll, keys, right-click drag, or the power bar, left-click to shoot
 - **Visual aiming aid** — dashed guide line + ghost ball showing where the target ball will travel
 - **2-player local multiplayer** — pass the keyboard/mouse between friends
 
@@ -37,7 +37,7 @@ python main.py
 | Action | Control |
 |--------|---------|
 | Aim | Move the mouse |
-| Set shot power | Scroll wheel (up = more power) |
+| Set shot power | Scroll wheel, arrow keys, + / -, or click-drag the power bar |
 | Set shot power (alternate) | Hold right-click and drag away from ball |
 | Shoot | Left-click |
 | Place cue ball (ball-in-hand) | Left-click on the table |

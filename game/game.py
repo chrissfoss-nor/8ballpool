@@ -25,6 +25,7 @@ from utils.constants import (
     WINDOW_W, WINDOW_H, FPS,
     TABLE_OFFSET_X, TABLE_OFFSET_Y, TABLE_W, TABLE_H,
     BALL_RADIUS, RACK_BALL_SPACING, HUD_HEIGHT, POWER_BAR_HEIGHT,
+    POWER_SCROLL_STEP,
 )
 from entities.ball        import Ball, BallState, BallGroup
 from entities.table       import create_table
@@ -34,7 +35,7 @@ from game.state_machine   import GameState, can_transition
 from game.rules           import RulesEngine, FOUL_SCRATCH
 from game.turn_manager    import TurnManager
 from ui.renderer          import draw_frame
-from ui.hud               import draw_hud
+from ui.hud               import draw_hud, get_power_bar_hit_rect, get_power_bar_track_rect
 from ui.overlay           import (
     draw_foul_overlay, draw_ball_in_hand_overlay,
     draw_win_overlay, draw_loss_overlay, draw_break_prompt,
@@ -88,6 +89,7 @@ class Game:
         # Input helpers
         # -----------------------------------------------------------------------
         self._right_dragging  : bool           = False
+        self._power_dragging  : bool           = False
         self._placement_valid : bool           = True
         self._mouse_pos       : tuple          = (0, 0)
 
@@ -161,6 +163,7 @@ class Game:
         self.break_restricted  = False
         self.show_break_prompt = True
         self._right_dragging   = False
+        self._power_dragging   = False
         self.cue.reset()
         self._setup_rack()
         self.cue.visible = True
@@ -190,7 +193,10 @@ class Game:
         # --- Mouse move ---
         if event.type == pygame.MOUSEMOTION:
             self._mouse_pos = event.pos
-            if self.state in (GameState.PLAYER_AIMING, GameState.BREAK_SHOT):
+            if self._power_dragging and self._is_aiming_state():
+                self._set_power_from_pointer(event.pos)
+                return
+            if self._is_aiming_state():
                 cue_ball = self._get_cue_ball()
                 if cue_ball:
                     self.cue.on_mouse_move(event.pos, cue_ball.pos)
@@ -207,6 +213,8 @@ class Game:
 
         # --- Mouse button up ---
         if event.type == pygame.MOUSEBUTTONUP:
+            if event.button == 1:
+                self._power_dragging = False
             if event.button == 3:   # right mouse button
                 self._right_dragging = False
                 self.cue.end_drag()
@@ -214,7 +222,7 @@ class Game:
 
         # --- Scroll wheel ---
         if event.type == pygame.MOUSEWHEEL:
-            if self.state in (GameState.PLAYER_AIMING, GameState.BREAK_SHOT):
+            if self._is_aiming_state():
                 self.cue.on_scroll(event.y)   # y > 0 = scroll up = more power
             return
 
@@ -235,12 +243,26 @@ class Game:
             elif self.show_break_prompt and self.state == GameState.BREAK_SHOT:
                 self.show_break_prompt = False
 
+        elif self._is_aiming_state():
+            if event.key in (pygame.K_UP, pygame.K_RIGHT, pygame.K_EQUALS, pygame.K_KP_PLUS):
+                self.cue.adjust_power(POWER_SCROLL_STEP)
+            elif event.key in (pygame.K_DOWN, pygame.K_LEFT, pygame.K_MINUS, pygame.K_KP_MINUS):
+                self.cue.adjust_power(-POWER_SCROLL_STEP)
+
     def _handle_mouse_down(self, event: pygame.event.Event) -> None:
         """Handle mouse button press."""
         if event.button == 1:   # left click
+            if (
+                self._is_aiming_state()
+                and not self.show_break_prompt
+                and get_power_bar_hit_rect().collidepoint(event.pos)
+            ):
+                self._power_dragging = True
+                self._set_power_from_pointer(event.pos)
+                return
             self._handle_left_click(event.pos)
         elif event.button == 3:  # right click — start power drag
-            if self.state in (GameState.PLAYER_AIMING, GameState.BREAK_SHOT):
+            if self._is_aiming_state():
                 self._right_dragging = True
                 self.cue.start_drag(event.pos)
 
@@ -263,7 +285,7 @@ class Game:
             return
 
         # Shoot (both aiming states)
-        if self.state in (GameState.PLAYER_AIMING, GameState.BREAK_SHOT):
+        if self._is_aiming_state():
             self._execute_shot()
 
     # ==========================================================================
@@ -274,6 +296,8 @@ class Game:
         """Apply the cue impulse to the cue ball and transition to BALLS_MOVING."""
         cue_ball = self._get_cue_ball()
         if cue_ball is None:
+            return
+        if self.cue.power <= 0.0:
             return
 
         # Apply impulse
@@ -549,6 +573,17 @@ class Game:
             if ball.is_cue_ball:
                 return ball
         return None
+
+    def _is_aiming_state(self) -> bool:
+        """Return True while players may aim and set shot power."""
+        return self.state in (GameState.PLAYER_AIMING, GameState.BREAK_SHOT)
+
+    def _set_power_from_pointer(self, pos: tuple) -> None:
+        """Map a pointer position on the HUD power bar to cue power."""
+        track = get_power_bar_track_rect()
+        if track.width <= 0:
+            return
+        self.cue.set_power((pos[0] - track.left) / track.width)
 
 
 # =============================================================================
