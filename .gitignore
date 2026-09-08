@@ -62,5 +62,9 @@ ai_policy*.json
 # Decision export - regenerate with `python -m ai.inspect`
 ai_decisions.json
 
+# Self-play dataset - regenerate with `python -m ai.selfplay`
+selfplay*.jsonl
+selfplay.log
+
 # Training run output
 train_overnight.log
