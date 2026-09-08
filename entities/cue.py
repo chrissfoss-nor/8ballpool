@@ -15,6 +15,7 @@ import math
 import pygame
 
 from utils.vector import Vec2
+from physics.spin import clamp_tip_offset
 from utils.constants import (
     MAX_SHOT_IMPULSE, MIN_SHOT_IMPULSE,
     POWER_DRAG_DISTANCE, POWER_SCROLL_STEP,
@@ -33,6 +34,12 @@ class Cue:
         Points FROM the cue ball TOWARDS where the player wants to hit.
     power : float
         Shot strength in [0.0, 1.0].  0 = min impulse, 1 = max impulse.
+    tip : Vec2
+        Where the tip strikes the cue ball, in ball radii from its centre:
+        +x is right-hand english, +y is top spin.  (0, 0) is centre ball.
+    pullback : float
+        Extra pixels between tip and ball, driven by the shot wind-up.
+        Positive draws the cue back, negative pushes it into the ball.
     visible : bool
         Whether to draw the cue.  Hidden while balls are moving.
     _drag_start : Vec2 | None
@@ -44,6 +51,8 @@ class Cue:
     def __init__(self):
         self.angle            : float        = 0.0
         self.power            : float        = 0.5      # default half power
+        self.tip              : Vec2         = Vec2(0.0, 0.0)
+        self.pullback         : float        = 0.0
         self.visible          : bool         = False
         self._drag_start      : Vec2 | None  = None
         self._drag_start_power: float        = 0.5
@@ -72,6 +81,22 @@ class Cue:
     def adjust_power(self, delta: float):
         """Nudge shot power by *delta*, clamped to the valid [0, 1] range."""
         self.set_power(self.power + delta)
+
+    # ------------------------------------------------------------------
+    # Tip offset (spin)
+    # ------------------------------------------------------------------
+
+    def set_tip(self, x: float, y: float):
+        """Place the tip on the cue ball, clamped to what a cue can strike."""
+        self.tip = Vec2(*clamp_tip_offset(x, y))
+
+    def nudge_tip(self, dx: float, dy: float):
+        """Move the tip by a small step (keyboard control)."""
+        self.set_tip(self.tip.x + dx, self.tip.y + dy)
+
+    def reset_tip(self):
+        """Return the tip to the centre of the cue ball."""
+        self.tip = Vec2(0.0, 0.0)
 
     def start_drag(self, mouse_pos: tuple):
         """Begin a right-click drag to adjust power."""
@@ -104,6 +129,13 @@ class Cue:
         self.power   = 0.5
         self.visible = False
         self._drag_start = None
+        self.pullback = 0.0
+        self.reset_tip()
+
+    @property
+    def rest_gap(self) -> float:
+        """Gap from ball centre to cue tip when the cue is at rest, in pixels."""
+        return CUE_GAP_BASE + self.power * CUE_GAP_POWER
 
     # ------------------------------------------------------------------
     # Shot vector
@@ -133,8 +165,9 @@ class Cue:
         if not self.visible:
             return
 
-        # Gap between cue tip and ball centre (increases with power)
-        gap = CUE_GAP_BASE + self.power * CUE_GAP_POWER
+        # Gap between cue tip and ball centre: wider with power, and moved by
+        # the wind-up while a shot is being played.
+        gap = self.rest_gap + self.pullback
 
         # Direction unit vectors
         dx = math.cos(self.angle)

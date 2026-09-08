@@ -7,7 +7,7 @@ All rendering code — table, balls, cue stick, HUD panels, and overlays.
 | File | Purpose |
 |------|---------|
 | `renderer.py` | `draw_frame()` — draws one complete frame: background, wood, cushions, felt, pockets, head string, ball shadows, balls (with numbers/stripes), aiming line, cue stick, and ghost ball for ball-in-hand. |
-| `hud.py` | `draw_hud()` — top strip (player names, group labels, pocketed mini-balls, turn arrow) and bottom strip (shot power bar). |
+| `hud.py` | `draw_hud()` — top strip (player names, group labels, pocketed mini-balls, turn arrow, spin dial) and bottom strip (shot power bar). `get_spin_dial_rect()` and `spin_from_pointer()` turn a click on the dial into a tip offset. |
 | `overlay.py` | Semi-transparent pop-up panels for foul notifications, win/loss screens, break prompts, and ball-in-hand instructions. |
 | `assets.py` | Font cache (`get_font`, `get_bold_font`) and `draw_text_centered` helper. No image files — everything is drawn procedurally. |
 

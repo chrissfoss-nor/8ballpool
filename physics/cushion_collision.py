@@ -9,7 +9,15 @@
 from entities.ball import Ball, BallState
 from entities.table import Table
 from utils.constants import BALL_RADIUS, RESTITUTION_CUSHION
+from physics.spin import bounce_spin_off_cushion
 from utils.vector import Vec2
+
+
+# Inward normals of the four cushions, pointing away from the rail.
+_NORMAL_LEFT   = Vec2( 1.0,  0.0)
+_NORMAL_RIGHT  = Vec2(-1.0,  0.0)
+_NORMAL_TOP    = Vec2( 0.0,  1.0)
+_NORMAL_BOTTOM = Vec2( 0.0, -1.0)
 
 
 def resolve_cushions_and_pockets(
@@ -46,8 +54,12 @@ def resolve_cushions_and_pockets(
 
 def _try_pocket(ball: Ball, table: Table, pocket_callback=None) -> bool:
     """Pocket *ball* if its centre is inside any pocket capture radius."""
+    pos = ball.pos
     for pocket in table.pockets:
-        if pocket.contains(ball.pos):
+        px = pos.x - pocket.pos.x
+        py = pos.y - pocket.pos.y
+        radius = pocket.collision_radius
+        if px * px + py * py <= radius * radius:
             ball.pocket()
             if pocket_callback:
                 pocket_callback(ball)
@@ -64,24 +76,34 @@ def _resolve_felt_walls(ball: Ball, table: Table) -> bool:
     top = table.top + ball.radius
     bottom = table.bottom - ball.radius
 
+    spinning = ball.is_cue_ball
+
     if ball.pos.x < left and not _vertical_wall_has_pocket_gap(table, ball.pos.y):
         ball.pos.x = left
         ball.vel.x = abs(ball.vel.x) * RESTITUTION_CUSHION
+        if spinning:
+            bounce_spin_off_cushion(ball, _NORMAL_LEFT)
         hit = True
 
     if ball.pos.x > right and not _vertical_wall_has_pocket_gap(table, ball.pos.y):
         ball.pos.x = right
         ball.vel.x = -abs(ball.vel.x) * RESTITUTION_CUSHION
+        if spinning:
+            bounce_spin_off_cushion(ball, _NORMAL_RIGHT)
         hit = True
 
     if ball.pos.y < top and not _horizontal_wall_has_pocket_gap(table, ball.pos.x):
         ball.pos.y = top
         ball.vel.y = abs(ball.vel.y) * RESTITUTION_CUSHION
+        if spinning:
+            bounce_spin_off_cushion(ball, _NORMAL_TOP)
         hit = True
 
     if ball.pos.y > bottom and not _horizontal_wall_has_pocket_gap(table, ball.pos.x):
         ball.pos.y = bottom
         ball.vel.y = -abs(ball.vel.y) * RESTITUTION_CUSHION
+        if spinning:
+            bounce_spin_off_cushion(ball, _NORMAL_BOTTOM)
         hit = True
 
     return hit
@@ -93,10 +115,18 @@ def _resolve_pocket_jaws(ball: Ball, table: Table) -> bool:
     min_dist = ball.radius
 
     for jaw in _pocket_jaw_points(table):
-        delta = ball.pos - jaw
-        dist = delta.length()
-        if dist >= min_dist:
+        # Raw-float reject first — twelve jaws are tested per ball per
+        # sub-step and almost none of them are ever in range.  ball.pos is
+        # re-read every iteration because a jaw hit rebinds it.
+        pos = ball.pos
+        dx = pos.x - jaw.x
+        dy = pos.y - jaw.y
+        dist_sq = dx * dx + dy * dy
+        if dist_sq >= min_dist * min_dist:
             continue
+
+        delta = Vec2(dx, dy)
+        dist = dist_sq ** 0.5
 
         if dist < 1e-6:
             normal = (-ball.vel).normalize()
@@ -107,6 +137,8 @@ def _resolve_pocket_jaws(ball: Ball, table: Table) -> bool:
 
         if ball.vel.dot(normal) < 0.0:
             ball.vel = ball.vel.reflect(normal) * RESTITUTION_CUSHION
+            if ball.is_cue_ball:
+                bounce_spin_off_cushion(ball, normal)
 
         ball.pos = jaw + normal * (min_dist + 0.25)
         hit = True
@@ -149,22 +181,54 @@ def _horizontal_wall_has_pocket_gap(table: Table, x: float) -> bool:
     )
 
 
+# ---------------------------------------------------------------------------
+# Geometry cache
+#
+# The mouth widths and the twelve jaw points are pure functions of the table,
+# which never changes after create_table().  Recomputing them per ball per
+# sub-step was allocating hundreds of thousands of throwaway Vec2 objects on
+# an ordinary shot, so they are memoised on the Table instance itself.
+# ---------------------------------------------------------------------------
+
+def _mouth_half_widths(table: Table) -> tuple[float, float]:
+    """Return (corner_half_width, side_half_width), cached on the table."""
+    cached = getattr(table, "_mouth_half_widths_cache", None)
+    if cached is None:
+        corner = BALL_RADIUS * 2.0
+        side = BALL_RADIUS * 2.22
+        for pocket in table.pockets:
+            if pocket.kind == "corner":
+                corner = pocket.mouth_half_width
+                break
+        for pocket in table.pockets:
+            if pocket.kind == "side":
+                side = pocket.mouth_half_width
+                break
+        cached = (corner, side)
+        table._mouth_half_widths_cache = cached
+    return cached
+
+
 def _corner_mouth_half_width(table: Table) -> float:
-    for pocket in table.pockets:
-        if pocket.kind == "corner":
-            return pocket.mouth_half_width
-    return BALL_RADIUS * 2.0
+    return _mouth_half_widths(table)[0]
 
 
 def _side_mouth_half_width(table: Table) -> float:
-    for pocket in table.pockets:
-        if pocket.kind == "side":
-            return pocket.mouth_half_width
-    return BALL_RADIUS * 2.22
+    return _mouth_half_widths(table)[1]
 
 
 def _pocket_jaw_points(table: Table) -> list[Vec2]:
-    """Return the cushion-tip points around every pocket mouth."""
+    """Return the cushion-tip points around every pocket mouth (cached)."""
+    cached = getattr(table, "_jaw_points_cache", None)
+    if cached is not None:
+        return cached
+    cached = _compute_pocket_jaw_points(table)
+    table._jaw_points_cache = cached
+    return cached
+
+
+def _compute_pocket_jaw_points(table: Table) -> list[Vec2]:
+    """Build the cushion-tip points around every pocket mouth."""
     left = table.left
     right = table.right
     top = table.top

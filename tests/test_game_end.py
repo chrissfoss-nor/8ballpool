@@ -76,11 +76,27 @@ def _line_up_on_a_corner_pocket(game, number):
     return math.atan2(pocket.pos.y - cue.pos.y, pocket.pos.x - cue.pos.x)
 
 
-def _shoot(game, angle, power=0.5):
+def _shoot(game, angle, power=0.5, spin=(0.0, -0.5)):
+    """Fire the shot and run the physics until everything stops.
+
+    These are dead-straight full-ball pots, and a cue ball that arrives
+    rolling follows the object ball straight into the pocket after one — so
+    they are played with bottom, the way anyone would play them.  The rule
+    being tested is what happens when the 8 drops, not the in-off.
+    """
     game.cue.angle = angle
     game.cue.power = power
+    game.cue.set_tip(*spin)
     game._execute_shot()
+
+    # The shot is committed but the ball is not struck until the cue's wind-up
+    # has played out, so the first loop runs the cue forward into the ball.
     frames = 0
+    while game.state != GameState.BALLS_MOVING and frames < 300:
+        game._update(1 / 60.0)
+        frames += 1
+    assert frames < 300, "the cue never reached the ball"
+
     while game.state == GameState.BALLS_MOVING and frames < 3000:
         game._update(1 / 60.0)
         frames += 1

@@ -25,17 +25,24 @@ from utils.constants import (
     WINDOW_W, WINDOW_H, FPS,
     TABLE_OFFSET_X, TABLE_OFFSET_Y, TABLE_W, TABLE_H,
     BALL_RADIUS, RACK_BALL_SPACING, HUD_HEIGHT, POWER_BAR_HEIGHT,
-    POWER_SCROLL_STEP,
+    POWER_SCROLL_STEP, SPIN_NUDGE_STEP, SHOT_AIM_HOLD_SECONDS,
 )
 from entities.ball        import Ball, BallState, BallGroup
 from entities.table       import create_table
 from entities.cue         import Cue
 from physics.engine       import PhysicsEngine
+from physics.spin         import apply_cue_strike
+from game.shot_animation  import ShotAnimation
 from game.state_machine   import GameState, can_transition
 from game.rules           import RulesEngine, FOUL_SCRATCH
 from game.turn_manager    import TurnManager
+from ai.policy            import AIPlayer, AISearch
+from ai.simulation        import GameSnapshot
 from ui.renderer          import draw_frame
-from ui.hud               import draw_hud, get_power_bar_hit_rect, get_power_bar_track_rect
+from ui.hud               import (
+    draw_hud, get_power_bar_hit_rect, get_power_bar_track_rect,
+    get_spin_dial_rect, spin_from_pointer,
+)
 from ui.overlay           import (
     draw_foul_overlay, draw_ball_in_hand_overlay,
     draw_win_overlay, draw_loss_overlay, draw_break_prompt,
@@ -50,7 +57,18 @@ class Game:
         game.run()
     """
 
-    def __init__(self, screen: pygame.Surface, clock: pygame.time.Clock):
+    def __init__(
+        self,
+        screen: pygame.Surface,
+        clock: pygame.time.Clock,
+        ai_player_index: Optional[int] = None,
+        ai_policy_path: Optional[str] = None,
+        ai_candidate_count: int = 36,
+        ai_delay: float = 0.35,
+        ai_time_budget: Optional[float] = 0.9,
+        ai_slice: float = 0.006,
+        ai_aim_noise: float = 0.0,
+    ):
         self.screen = screen
         self.clock  = clock
 
@@ -68,7 +86,38 @@ class Game:
         # -----------------------------------------------------------------------
         # Player & turn management
         # -----------------------------------------------------------------------
-        self.turns = TurnManager("Player 1", "Player 2")
+        if ai_player_index is not None and ai_player_index not in (0, 1):
+            raise ValueError("ai_player_index must be 0, 1, or None")
+
+        player_names = ["Player 1", "Player 2"]
+        if ai_player_index is not None:
+            player_names[ai_player_index] = "AI Player"
+        self.turns = TurnManager(player_names[0], player_names[1])
+        self.ai_player_index: Optional[int] = ai_player_index
+        self.ai_player: Optional[AIPlayer] = None
+        if ai_player_index is not None:
+            self.ai_player = AIPlayer.load(
+                ai_policy_path,
+                candidate_count=ai_candidate_count,
+                seed=0,
+                table=self.table,
+                time_budget=ai_time_budget,
+            )
+        self.ai_delay = max(0.0, ai_delay)
+        self._ai_timer = self.ai_delay
+
+        # The AI searches a slice at a time so the loop keeps rendering while
+        # it thinks.  ai_slice is how much of each frame it may consume.
+        self.ai_slice = max(0.001, ai_slice)
+        self._ai_search: Optional[AISearch] = None
+
+        # Standard deviation, in radians, of the error added to the AI's aim
+        # when it actually plays the shot.  The search itself stays exact --
+        # the AI knows the right shot and simply does not execute it perfectly,
+        # which is what makes a weaker setting feel like a weaker player rather
+        # than a stupid one.
+        self.ai_aim_noise = max(0.0, ai_aim_noise)
+        self._ai_hand = random.Random()
 
         # -----------------------------------------------------------------------
         # Game state
@@ -90,6 +139,12 @@ class Game:
         # -----------------------------------------------------------------------
         self._right_dragging  : bool           = False
         self._power_dragging  : bool           = False
+        self._spin_dragging   : bool           = False
+
+        # The wind-up currently being played, if any.  While one is running the
+        # shot is already committed: the aim, the power and the tip offset are
+        # locked, and no further input is taken until the ball is struck.
+        self._shot_anim       : Optional[ShotAnimation] = None
         self._placement_valid : bool           = True
         self._mouse_pos       : tuple          = (0, 0)
 
@@ -98,6 +153,7 @@ class Game:
         # -----------------------------------------------------------------------
         self._setup_rack()
         self.cue.visible = True
+        self._arm_ai_turn()
 
     # ==========================================================================
     # Main loop
@@ -164,19 +220,25 @@ class Game:
         self.show_break_prompt = True
         self._right_dragging   = False
         self._power_dragging   = False
+        self._spin_dragging    = False
+        self._shot_anim        = None
         self.cue.reset()
         self._setup_rack()
         self.cue.visible = True
         self.physics.reset_for_shot()
+        self._arm_ai_turn()
 
     def _re_rack(self) -> None:
         """Re-rack all balls (used when 8-ball is pocketed on the break)."""
+        self._shot_anim = None
+        self.cue.pullback = 0.0
         self._setup_rack()
         self.physics.reset_for_shot()
         self.is_break    = True
         self.state       = GameState.BREAK_SHOT
         self.foul_message = ""
         self.cue.visible  = True
+        self._arm_ai_turn()
 
     # ==========================================================================
     # Event handling
@@ -190,9 +252,15 @@ class Game:
             self._handle_keydown(event)
             return
 
+        if self._ai_controls_current_state():
+            return
+
         # --- Mouse move ---
         if event.type == pygame.MOUSEMOTION:
             self._mouse_pos = event.pos
+            if self._spin_dragging and self._is_aiming_state():
+                self.cue.set_tip(*spin_from_pointer(event.pos))
+                return
             if self._power_dragging and self._is_aiming_state():
                 self._set_power_from_pointer(event.pos)
                 return
@@ -215,6 +283,7 @@ class Game:
         if event.type == pygame.MOUSEBUTTONUP:
             if event.button == 1:
                 self._power_dragging = False
+                self._spin_dragging  = False
             if event.button == 3:   # right mouse button
                 self._right_dragging = False
                 self.cue.end_drag()
@@ -235,6 +304,9 @@ class Game:
             # R to reset at any time
             self._full_reset()
 
+        elif self._ai_controls_current_state():
+            return
+
         elif event.key == pygame.K_SPACE:
             # SPACE acknowledges foul overlay
             if self.state == GameState.FOUL_PENALTY:
@@ -248,10 +320,30 @@ class Game:
                 self.cue.adjust_power(POWER_SCROLL_STEP)
             elif event.key in (pygame.K_DOWN, pygame.K_LEFT, pygame.K_MINUS, pygame.K_KP_MINUS):
                 self.cue.adjust_power(-POWER_SCROLL_STEP)
+            # Where the tip strikes the cue ball: W/S for follow and draw,
+            # A/D for left and right english, C back to centre ball.
+            elif event.key == pygame.K_w:
+                self.cue.nudge_tip(0.0, SPIN_NUDGE_STEP)
+            elif event.key == pygame.K_s:
+                self.cue.nudge_tip(0.0, -SPIN_NUDGE_STEP)
+            elif event.key == pygame.K_a:
+                self.cue.nudge_tip(-SPIN_NUDGE_STEP, 0.0)
+            elif event.key == pygame.K_d:
+                self.cue.nudge_tip(SPIN_NUDGE_STEP, 0.0)
+            elif event.key == pygame.K_c:
+                self.cue.reset_tip()
 
     def _handle_mouse_down(self, event: pygame.event.Event) -> None:
         """Handle mouse button press."""
         if event.button == 1:   # left click
+            if (
+                self._is_aiming_state()
+                and not self.show_break_prompt
+                and get_spin_dial_rect().collidepoint(event.pos)
+            ):
+                self._spin_dragging = True
+                self.cue.set_tip(*spin_from_pointer(event.pos))
+                return
             if (
                 self._is_aiming_state()
                 and not self.show_break_prompt
@@ -293,16 +385,60 @@ class Game:
     # ==========================================================================
 
     def _execute_shot(self) -> None:
-        """Apply the cue impulse to the cue ball and transition to BALLS_MOVING."""
+        """Commit to the shot and start the cue's wind-up.
+
+        The ball is not touched here.  The cue holds its line, draws back and
+        comes forward, and _strike_ball() fires the moment the tip arrives --
+        which is what makes an AI shot something you can watch rather than a
+        table that rearranges itself.
+        """
         cue_ball = self._get_cue_ball()
         if cue_ball is None:
             return
         if self.cue.power <= 0.0:
             return
+        if self._shot_anim is not None:
+            return   # already winding up; the shot is committed
 
-        # Apply impulse
-        cue_ball.vel   = self.cue.get_shot_vector()
-        cue_ball.state = BallState.ROLLING
+        # Your own shots skip the hold: you have been looking down that line
+        # the whole time you were aiming.
+        hold = SHOT_AIM_HOLD_SECONDS if self._is_ai_turn() else 0.0
+        self._shot_anim = ShotAnimation(
+            self.cue.power,
+            reach=self.cue.rest_gap - BALL_RADIUS,
+            aim_hold=hold,
+        )
+        self.cue.pullback = 0.0
+
+    def _update_shot_animation(self, dt: float) -> None:
+        """Advance the wind-up, and strike the ball when the tip arrives."""
+        if self._shot_anim is None:
+            return
+        if self._shot_anim.update(dt):
+            self._strike_ball()
+        else:
+            self.cue.pullback = self._shot_anim.offset
+
+    def _strike_ball(self) -> None:
+        """The tip has reached the ball: send it, and let the physics take over."""
+        self._shot_anim = None
+        self.cue.pullback = 0.0
+
+        cue_ball = self._get_cue_ball()
+        if cue_ball is None:
+            return
+
+        # Apply impulse, with whatever spin the tip offset asks for
+        apply_cue_strike(
+            cue_ball,
+            self.cue.get_shot_vector(),
+            self.cue.tip.x,
+            self.cue.tip.y,
+        )
+
+        # Spin is deliberate, never inherited: the next shot starts on centre
+        # ball unless it is asked for again.
+        self.cue.reset_tip()
 
         # Hide the cue during flight
         self.cue.visible = False
@@ -370,6 +506,8 @@ class Game:
     def _update(self, dt: float) -> None:
         """Per-frame game logic."""
 
+        self._update_shot_animation(dt)
+
         if self.state == GameState.BALLS_MOVING:
             self.physics.update(dt, self.balls)
 
@@ -381,6 +519,8 @@ class Game:
         if self.state == GameState.BALL_IN_HAND:
             pos = Vec2(self._mouse_pos[0], self._mouse_pos[1])
             self._placement_valid = self._is_valid_placement(pos)
+
+        self._update_ai(dt)
 
     # ==========================================================================
     # Shot completion and rules evaluation
@@ -476,6 +616,7 @@ class Game:
             if not (self.state == GameState.BREAK_SHOT and new_state == GameState.PLAYER_AIMING):
                 return   # Silently ignore invalid transitions
         self.state = new_state
+        self._arm_ai_turn()
 
     # ==========================================================================
     # Rendering
@@ -519,7 +660,9 @@ class Game:
             p2_pocketed    = self.turns.players[1].pocketed_balls,
             current_player = self.turns.current_idx,
             power          = self.cue.power,
+            spin           = self.cue.tip.to_tuple(),
             foul_message   = hud_foul,
+            status_message = "AI is thinking..." if self.ai_is_thinking else "",
         )
 
         # Overlays (drawn last, on top of everything)
@@ -575,8 +718,16 @@ class Game:
         return None
 
     def _is_aiming_state(self) -> bool:
-        """Return True while players may aim and set shot power."""
-        return self.state in (GameState.PLAYER_AIMING, GameState.BREAK_SHOT)
+        """Return True while players may aim and set shot power.
+
+        A wind-up in flight means the shot is already committed, so nothing is
+        accepted until the ball has been struck -- which also keeps the AI from
+        starting a fresh search over its own shot.
+        """
+        return (
+            self.state in (GameState.PLAYER_AIMING, GameState.BREAK_SHOT)
+            and self._shot_anim is None
+        )
 
     def _set_power_from_pointer(self, pos: tuple) -> None:
         """Map a pointer position on the HUD power bar to cue power."""
@@ -584,6 +735,129 @@ class Game:
         if track.width <= 0:
             return
         self.cue.set_power((pos[0] - track.left) / track.width)
+
+    def _is_ai_turn(self) -> bool:
+        return (
+            self.ai_player is not None
+            and self.ai_player_index is not None
+            and self.turns.current_idx == self.ai_player_index
+        )
+
+    def _ai_controls_current_state(self) -> bool:
+        return self._is_ai_turn() and self.state in (
+            GameState.BREAK_SHOT,
+            GameState.PLAYER_AIMING,
+            GameState.FOUL_PENALTY,
+            GameState.BALL_IN_HAND,
+        )
+
+    def _arm_ai_turn(self) -> None:
+        # Any search still in flight was started for a position that no longer
+        # applies, so it is dropped rather than resumed.
+        self._ai_search = None
+        if self._ai_controls_current_state():
+            self._ai_timer = self.ai_delay
+        else:
+            self._ai_timer = 0.0
+
+    @property
+    def ai_is_thinking(self) -> bool:
+        """True while a search is in flight, for the thinking indicator."""
+        return self._ai_search is not None and not self._ai_search.done
+
+    def _update_ai(self, dt: float) -> None:
+        """Let the AI acknowledge, place, and shoot when it owns the turn.
+
+        The search runs a slice per frame instead of blocking, so the table
+        keeps animating at full frame rate while the AI decides.
+        """
+        if self._shot_anim is not None:
+            return   # its own shot is on the way; nothing to decide
+
+        if self.ai_player is None or not self._ai_controls_current_state():
+            self._ai_search = None
+            return
+
+        self._ai_timer = max(0.0, self._ai_timer - dt)
+        if self._ai_timer > 0.0:
+            return
+
+        if self.state == GameState.FOUL_PENALTY:
+            self._transition(GameState.BALL_IN_HAND)
+            return
+
+        if self.show_break_prompt and self.state == GameState.BREAK_SHOT:
+            self.show_break_prompt = False
+
+        if self._ai_search is None:
+            self._ai_search = self.ai_player.start_search(self._make_ai_snapshot())
+
+        if not self._ai_search.advance(self.ai_slice):
+            return   # still thinking; render this frame and come back
+
+        decision = self._ai_search.decision()
+        self._ai_search = None
+        shot = decision.shot
+
+        if self.state == GameState.BALL_IN_HAND:
+            if shot.cue_ball_pos is None:
+                placement_pos = self._find_ai_fallback_placement()
+                if placement_pos is None:
+                    self._ai_timer = self.ai_delay
+                    return
+                self._try_place_cue_ball(placement_pos)
+                return
+
+            placement = Vec2(shot.cue_ball_pos[0], shot.cue_ball_pos[1])
+            if not self._is_valid_placement(placement):
+                placement_pos = self._find_ai_fallback_placement()
+                if placement_pos is None:
+                    self._ai_timer = self.ai_delay
+                    return
+                self._try_place_cue_ball(placement_pos)
+                return
+
+            self._try_place_cue_ball(shot.cue_ball_pos)
+            if not self._is_ai_turn() or not self._is_aiming_state():
+                return
+
+        if self._is_aiming_state():
+            self.cue.angle = shot.angle + self._ai_aim_error()
+            self.cue.set_power(shot.clamped_power)
+            self.cue.set_tip(*shot.clamped_spin)
+            self._execute_shot()
+
+    def _ai_aim_error(self) -> float:
+        """Random aiming error for the current difficulty, in radians."""
+        if self.ai_aim_noise <= 0.0:
+            return 0.0
+        return self._ai_hand.gauss(0.0, self.ai_aim_noise)
+
+    def _make_ai_snapshot(self) -> GameSnapshot:
+        return GameSnapshot.from_runtime(
+            balls=self.balls,
+            turns=self.turns,
+            is_break=self.is_break,
+            break_restricted=self.break_restricted,
+            game_over=self.state == GameState.GAME_OVER,
+            winner_name=self.winner_name,
+            loser_name=self.loser_name,
+            loss_reason=self.loss_reason,
+        )
+
+    def _find_ai_fallback_placement(self) -> Optional[tuple[float, float]]:
+        candidates = [
+            Vec2(self.table.head_x, self.table.center.y),
+            Vec2(self.table.left + TABLE_W * 0.20, self.table.top + TABLE_H * 0.35),
+            Vec2(self.table.left + TABLE_W * 0.20, self.table.top + TABLE_H * 0.65),
+            Vec2(self.table.center.x, self.table.center.y),
+            Vec2(self.table.left + TABLE_W * 0.65, self.table.top + TABLE_H * 0.35),
+            Vec2(self.table.left + TABLE_W * 0.65, self.table.top + TABLE_H * 0.65),
+        ]
+        for pos in candidates:
+            if self._is_valid_placement(pos):
+                return pos.to_tuple()
+        return None
 
 
 # =============================================================================

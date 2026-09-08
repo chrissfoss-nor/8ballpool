@@ -2,7 +2,7 @@
 # hud.py — Heads-Up Display: player panels, turn indicator and power bar.
 #
 # The HUD is drawn in two horizontal strips:
-#   Top strip  : Player panels (left = P1, right = P2) + turn arrow.
+#   Top strip  : Player panels (left = P1, right = P2), turn arrow, spin dial.
 #   Bottom strip: Shot power bar.
 #
 # The HUD reads game state data passed in as plain values — it has no
@@ -29,6 +29,30 @@ PANEL_W       = 300    # Width of each player panel
 PANEL_MARGIN  = 20     # Margin from window edge
 PANEL_H       = HUD_HEIGHT - 10   # Panel height
 POWER_BAR_TRACK_H = 16
+
+# Spin dial: a cue ball seen head on, with a marker where the tip will strike.
+# It sits in the free strip between the left player panel and the turn arrow.
+SPIN_DIAL_RADIUS = 24
+SPIN_DIAL_CENTER = (PANEL_MARGIN + PANEL_W + 80, 34)
+
+
+def get_spin_dial_rect() -> pygame.Rect:
+    """Return the clickable area of the spin dial."""
+    cx, cy = SPIN_DIAL_CENTER
+    r = SPIN_DIAL_RADIUS
+    return pygame.Rect(cx - r, cy - r, r * 2, r * 2).inflate(10, 10)
+
+
+def spin_from_pointer(pos: tuple) -> tuple:
+    """Map a pointer position on the dial to a tip offset in ball radii.
+
+    Screen y grows downwards and top spin is up, so the vertical axis flips.
+    The caller clamps: pointing outside the dial means the furthest tip offset
+    in that direction, not an impossible one.
+    """
+    cx, cy = SPIN_DIAL_CENTER
+    scale = SPIN_DIAL_RADIUS / 0.5     # dial edge is the maximum tip offset
+    return ((pos[0] - cx) / scale, -(pos[1] - cy) / scale)
 
 
 def get_power_bar_track_rect() -> pygame.Rect:
@@ -60,7 +84,9 @@ def draw_hud(
     p2_pocketed     : List[int],   # list of ball numbers pocketed by P2
     current_player  : int,         # 0 = P1, 1 = P2
     power           : float,       # 0.0 – 1.0
+    spin            : tuple = (0.0, 0.0),   # tip offset in ball radii
     foul_message    : str = "",    # shown below panel if non-empty
+    status_message  : str = "",    # shown in the same slot when there is no foul
 ) -> None:
     """Draw the complete HUD onto *surface*."""
 
@@ -108,6 +134,11 @@ def draw_hud(
     _draw_turn_arrow(surface, current_player)
 
     # -----------------------------------------------------------------------
+    # Spin dial (left of centre)
+    # -----------------------------------------------------------------------
+    _draw_spin_dial(surface, spin)
+
+    # -----------------------------------------------------------------------
     # Power bar (bottom center)
     # -----------------------------------------------------------------------
     _draw_power_bar(surface, power)
@@ -121,6 +152,13 @@ def draw_hud(
             WINDOW_W // 2, HUD_HEIGHT + 14,
             color=(220, 80, 60),
             bold=True,
+        )
+    elif status_message:
+        # Same slot, calmer colour: this is information, not a penalty.
+        draw_text_centered(
+            surface, status_message, 16,
+            WINDOW_W // 2, HUD_HEIGHT + 14,
+            color=(170, 190, 170),
         )
 
 
@@ -209,6 +247,33 @@ def _draw_turn_arrow(surface: pygame.Surface, current_player: int) -> None:
     else:
         pts = [(cx + 10, cy + 12), (cx - 10, cy + 8), (cx - 10, cy + 16)]
     pygame.draw.polygon(surface, COLOR_TURN_ARROW, pts)
+
+
+# ---------------------------------------------------------------------------
+# Spin dial
+# ---------------------------------------------------------------------------
+
+def _draw_spin_dial(surface: pygame.Surface, spin: tuple) -> None:
+    """Draw the cue ball with a marker showing where the tip will strike."""
+    cx, cy = SPIN_DIAL_CENTER
+    r = SPIN_DIAL_RADIUS
+    centred = abs(spin[0]) < 1e-6 and abs(spin[1]) < 1e-6
+
+    pygame.draw.circle(surface, BALL_COLORS[0], (cx, cy), r)
+    pygame.draw.circle(surface, (120, 130, 120), (cx, cy), r, 1)
+
+    # Cross hairs through the centre, so an offset tip is easy to read.
+    pygame.draw.line(surface, (185, 190, 185), (cx - r + 4, cy), (cx + r - 4, cy), 1)
+    pygame.draw.line(surface, (185, 190, 185), (cx, cy - r + 4), (cx, cy + r - 4), 1)
+
+    scale = r / 0.5
+    tip_x = int(cx + spin[0] * scale)
+    tip_y = int(cy - spin[1] * scale)
+    marker = (110, 120, 130) if centred else COLOR_POWER_BAR_FILL
+    pygame.draw.circle(surface, marker, (tip_x, tip_y), 5)
+    pygame.draw.circle(surface, (40, 40, 40), (tip_x, tip_y), 5, 1)
+
+    draw_text_centered(surface, "SPIN", 12, cx, cy + r + 8, color=COLOR_TEXT)
 
 
 # ---------------------------------------------------------------------------

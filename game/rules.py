@@ -148,6 +148,11 @@ class RulesEngine:
             and current.group != BallGroup.NONE
             and b.group == opponent.group
         ]
+        current_had_cleared_group = self._had_cleared_group_before_shot(
+            current,
+            all_balls,
+            pocketed,
+        )
 
         # ------------------------------------------------------------------
         # Break-shot special handling
@@ -204,7 +209,7 @@ class RulesEngine:
         # ------------------------------------------------------------------
         if engine.first_contact_ball is not None:
             wrong = self._is_wrong_first_contact(
-                engine.first_contact_ball, current, all_balls
+                engine.first_contact_ball, current, current_had_cleared_group,
             )
             if wrong:
                 result.is_foul    = True
@@ -319,7 +324,25 @@ class RulesEngine:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _is_wrong_first_contact(first_ball: Ball, current_player, all_balls) -> bool:
+    def _had_cleared_group_before_shot(current_player, all_balls, pocketed) -> bool:
+        """Return True if the shooter had no group balls up before this shot."""
+        if current_player.group not in (BallGroup.SOLID, BallGroup.STRIPE):
+            return False
+
+        pocketed_ids = {id(ball) for ball in pocketed}
+        for ball in all_balls:
+            if ball.group != current_player.group:
+                continue
+            if not ball.pocketed or id(ball) in pocketed_ids:
+                return False
+        return True
+
+    @staticmethod
+    def _is_wrong_first_contact(
+        first_ball: Ball,
+        current_player,
+        current_had_cleared_group: bool,
+    ) -> bool:
         """Return True if the cue ball's first contact was illegal.
 
         Legal first contacts:
@@ -333,7 +356,7 @@ class RulesEngine:
                 return True
             return False   # Any other first contact is legal
 
-        if current_player.has_cleared_group(all_balls):
+        if current_had_cleared_group:
             # Must hit the 8-ball first when going for the win
             return first_ball.number != 8
 

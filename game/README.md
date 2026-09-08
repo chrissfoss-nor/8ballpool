@@ -7,6 +7,7 @@ Game logic, state machine, rules enforcement, and the main game loop.
 | File | Purpose |
 |------|---------|
 | `game.py` | `Game` class — owns the main loop (`run()`), all game objects, event dispatch, state transitions, rendering calls, and the connect between physics and rules. |
+| `shot_animation.py` | `ShotAnimation` — the wind-up between choosing a shot and striking it: hold the aim, draw back, strike. Owns nothing but time; the game applies the impulse when the tip arrives. |
 | `state_machine.py` | `GameState` enum + `VALID_TRANSITIONS` dict. `can_transition(from, to)` guards all state changes. |
 | `turn_manager.py` | `TurnManager` + `Player` dataclass. Tracks whose turn it is, each player's group/pocketed balls, and ball-in-hand status. |
 | `rules.py` | `RulesEngine.evaluate()` — pure function that reads `PhysicsEngine` shot data, applies 8-ball pool rules, and returns a `ShotResult`. |

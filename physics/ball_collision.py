@@ -25,6 +25,7 @@
 from utils.vector import Vec2
 from utils.constants import RESTITUTION_BALL
 from entities.ball import Ball, BallState
+from physics.spin import throw_off_side_spin
 
 
 def resolve_pair(
@@ -56,14 +57,23 @@ def resolve_pair(
 
     # ------------------------------------------------------------------
     # Distance check
+    #
+    # This is the hot path: the engine calls resolve_pair() for every pair
+    # every sub-step, and the overwhelming majority return here.  The check
+    # is written against raw floats rather than Vec2 arithmetic so the common
+    # "no contact" case allocates nothing at all.
     # ------------------------------------------------------------------
-    delta = ball_b.pos - ball_a.pos          # vector from a → b
-    dist_sq = delta.length_sq()
+    pa = ball_a.pos
+    pb = ball_b.pos
+    dx = pb.x - pa.x
+    dy = pb.y - pa.y
+    dist_sq = dx * dx + dy * dy
     min_dist = ball_a.radius + ball_b.radius
 
     if dist_sq >= min_dist * min_dist:
         return False   # No contact
 
+    delta = Vec2(dx, dy)                     # vector from a → b
     dist = dist_sq ** 0.5
 
     # ------------------------------------------------------------------
@@ -105,6 +115,25 @@ def resolve_pair(
 
     ball_a.vel -= n * impulse
     ball_b.vel += n * impulse
+
+    # ------------------------------------------------------------------
+    # Spin.  The two balls are in contact for far too short a time for the
+    # cloth to change how either of them is spinning, so the cue ball keeps
+    # the roll it arrived with and now finds itself travelling at a different
+    # speed — and that difference is the slip that makes it follow through a
+    # ball or draw back off it.  An object ball is taken to roll naturally
+    # from the instant it is struck, which leaves its path exactly what it
+    # was before spin existed.
+    # ------------------------------------------------------------------
+    if ball_a.is_cue_ball:
+        throw_off_side_spin(ball_a, ball_b, n)
+    elif ball_b.is_cue_ball:
+        throw_off_side_spin(ball_b, ball_a, -n)
+
+    if not ball_a.is_cue_ball:
+        ball_a.set_natural_roll()
+    if not ball_b.is_cue_ball:
+        ball_b.set_natural_roll()
 
     # Mark balls as rolling (they have non-zero velocity now)
     ball_a.state = BallState.ROLLING

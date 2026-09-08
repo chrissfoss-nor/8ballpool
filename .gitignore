@@ -55,3 +55,9 @@ Thumbs.db
 htmlcov/
 .pytest_cache/
 .tox/
+
+# Local AI training artifacts
+ai_policy*.json
+
+# Training run output
+train_overnight.log

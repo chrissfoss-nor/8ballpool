@@ -84,6 +84,60 @@ RESTITUTION_BALL    = 0.96  # Ball-ball collisions keep most energy
 RESTITUTION_CUSHION = 0.75  # Cushion absorbs more energy
 
 # ---------------------------------------------------------------------------
+# Spin (english)
+#
+# Only the cue ball carries spin: it is the only ball a tip ever touches, and
+# an object ball is assumed to pick up natural roll the instant it is struck.
+# That keeps every object-ball path exactly what it was before spin existed,
+# so the pot geometry and the shot powers tuned against it still hold.
+#
+# The tip offset is measured in ball radii from the centre of the cue ball:
+# (0, 0) is a centre-ball hit and the length is capped at SPIN_MAX_TIP_OFFSET,
+# beyond which a real tip miscues.
+#
+# Vertical offset is expressed as a *deviation from natural roll* rather than
+# as an absolute angular velocity, because the friction model already treats a
+# struck ball as rolling from the first frame.  A centre-ball hit therefore
+# behaves exactly as it always has, and the gains below say how far the two
+# extremes bend away from it:
+#
+#   tip_y = +0.5  ->  roll =  1.25 * speed  (follow: 0.36 * speed after a full hit)
+#   tip_y =  0.0  ->  roll =  1.00 * speed  (natural roll, unchanged behaviour)
+#   tip_y = -0.5  ->  roll = -1.25 * speed  (draw: 0.36 * speed back off a full hit)
+#
+# The two extremes are the real thing: a tip half a radius off centre spins a
+# ball at 2.5 * offset * speed, which is 1.25 * speed either way.  Only the
+# middle of the range is bent, to keep a centre-ball hit rolling the way this
+# engine has always treated it, and that is why the two gains differ.
+# ---------------------------------------------------------------------------
+SPIN_MAX_TIP_OFFSET = 0.5    # radii — furthest from centre the tip may strike
+SPIN_FOLLOW_GAIN    = 0.5    # roll gain per radius of top spin
+SPIN_DRAW_GAIN      = 4.5    # roll gain per radius of bottom spin
+SPIN_SIDE_GAIN      = 1.4    # edge speed (px/s per px/s of shot) per radius of side
+
+# Cloth friction acting on the slip between a ball's roll and its travel.
+# A sphere's slip decays 3.5x faster than the speed it feeds into the centre
+# of mass, which is what makes a stunned ball settle into a roll rather than
+# skid forever.
+SPIN_SLIP_RATIO     = 3.5
+SPIN_SIDE_DECAY     = 1.8    # per second — side spin bleeds into the cloth
+
+# A rail grabs the ball: what survives the bounce is the deviation from
+# natural roll, damped, plus part of the side spin, which also kicks the ball
+# sideways along the cushion as it leaves.
+CUSHION_ROLL_RETENTION = 0.5
+CUSHION_SPIN_RETENTION = 0.55
+CUSHION_SPIN_GAIN      = 0.30
+
+# Side spin rubs against the object ball at contact and throws it off the
+# aiming line — the reason a cut played with english does not go where the
+# ghost ball says it will.
+SPIN_THROW_GAIN        = 0.05
+SPIN_THROW_RETENTION   = 0.80
+
+SPIN_NUDGE_STEP        = 0.10  # radii per key press on the spin controls
+
+# ---------------------------------------------------------------------------
 # Cue / shot
 # ---------------------------------------------------------------------------
 MAX_SHOT_IMPULSE    = 2200.0  # px/s at full power (1.0)
@@ -95,6 +149,16 @@ CUE_WIDTH_BASE      = 7       # px — thick end width
 CUE_WIDTH_TIP       = 3       # px — thin tip width
 CUE_GAP_BASE        = 18      # px — minimum gap cue tip to ball centre
 CUE_GAP_POWER       = 40      # px — extra gap added at full power
+
+# The wind-up before the ball is struck (game/shot_animation.py).  A shot used
+# to happen the instant it was decided, which makes the AI's shots impossible
+# to follow: the table just rearranges itself.  The hold is what gives you time
+# to read where it is aiming before it plays.
+SHOT_AIM_HOLD_SECONDS = 0.45  # cue sits still on the aiming line (AI shots)
+SHOT_PULL_SECONDS     = 0.30  # drawing the cue back
+SHOT_STRIKE_SECONDS   = 0.07  # coming forward into the ball
+CUE_PULL_BASE         = 22    # px drawn back at zero power
+CUE_PULL_POWER        = 78    # px of extra draw at full power
 
 # ---------------------------------------------------------------------------
 # Colors (RGB)

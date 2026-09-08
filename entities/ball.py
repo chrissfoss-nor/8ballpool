@@ -83,6 +83,15 @@ class Ball:
         Base RGB color used when drawing.
     pocketed : bool
         Convenience flag — True once the ball has been removed from play.
+    roll : Vec2
+        Rolling velocity: the speed the ball's contact patch would travel at
+        if it were rolling without slipping.  The difference roll - vel is the
+        slip the cloth works on, which is what makes a ball follow or draw.
+        Only the cue ball ever carries a value that differs from vel.
+    side_spin : float
+        Spin about the vertical axis, as the surface speed at the ball's
+        equator in px/s.  Positive spins the contact point counter-clockwise
+        in screen coordinates.  Only the cue ball ever carries it.
     """
 
     number : int
@@ -94,6 +103,8 @@ class Ball:
     group  : BallGroup = BallGroup.NONE
     color  : tuple     = field(default_factory=lambda: (200, 200, 200))
     pocketed: bool     = False
+    roll     : Vec2    = field(default_factory=Vec2)
+    side_spin: float   = 0.0
 
     def __post_init__(self):
         """Set group and color from ball number if not explicitly provided."""
@@ -132,9 +143,20 @@ class Ball:
     # Helpers
     # ------------------------------------------------------------------
 
+    def set_natural_roll(self) -> None:
+        """Declare the ball to be rolling at its current velocity (no slip)."""
+        self.roll = Vec2(self.vel.x, self.vel.y)
+
+    @property
+    def slip(self) -> Vec2:
+        """Velocity of the contact patch relative to the cloth."""
+        return self.roll - self.vel
+
     def stop(self):
         """Immediately halt the ball and mark it stationary."""
         self.vel = Vec2(0.0, 0.0)
+        self.roll = Vec2(0.0, 0.0)
+        self.side_spin = 0.0
         self.state = BallState.STATIONARY
 
     def pocket(self):
@@ -142,12 +164,16 @@ class Ball:
         self.pocketed = True
         self.state    = BallState.POCKETED
         self.vel      = Vec2(0.0, 0.0)
+        self.roll     = Vec2(0.0, 0.0)
+        self.side_spin = 0.0
 
     def reset_for_placement(self):
         """Re-activate a pocketed cue ball for ball-in-hand placement."""
         self.pocketed = False
         self.state    = BallState.STATIONARY
         self.vel      = Vec2(0.0, 0.0)
+        self.roll     = Vec2(0.0, 0.0)
+        self.side_spin = 0.0
 
     def __repr__(self) -> str:
         return (f"Ball(#{self.number} {self.group.name} "

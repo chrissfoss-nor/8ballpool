@@ -105,8 +105,14 @@ class PhysicsEngine:
         # Divide dt into sub-steps for numerical stability
         dt_sub = dt / NUM_SUBSTEPS
 
+        # The active set only shrinks within a frame (balls can be pocketed
+        # but never un-pocketed), and every routine below re-checks .pocketed
+        # itself, so it is safe to build this list once per frame instead of
+        # once per sub-step.
+        active = [b for b in balls if not b.pocketed]
+
         for _ in range(NUM_SUBSTEPS):
-            self._substep(dt_sub, balls)
+            self._substep(dt_sub, active)
 
         # After all sub-steps, check if every active ball has stopped
         self.all_stationary = all(
@@ -118,37 +124,60 @@ class PhysicsEngine:
     # Single sub-step
     # ------------------------------------------------------------------
 
-    def _substep(self, dt: float, balls: List[Ball]) -> None:
-        """One physics sub-step: friction → ball-ball → cushion/pocket."""
+    def _substep(self, dt: float, active: List[Ball]) -> None:
+        """One physics sub-step: friction → ball-ball → cushion/pocket.
 
-        active = [b for b in balls if not b.pocketed]
+        Only *moving* balls are integrated, collided and reflected.  A ball at
+        rest cannot start moving on its own, so the only pairs worth testing
+        are those with at least one roller, and a resting ball cannot cross a
+        cushion or drop into a pocket.  On a typical shot one or two of the
+        sixteen balls are in motion, so this turns 120 pair tests per sub-step
+        into a handful.
+        """
+        rolling = BallState.ROLLING
 
-        # 1. Apply friction to every active ball
-        for ball in active:
+        # 1. Apply friction to the balls that are actually moving.
+        #    (apply_friction is a no-op for stationary and pocketed balls.)
+        moving = [b for b in active if b.state is rolling]
+        if not moving:
+            return
+
+        for ball in moving:
             apply_friction(ball, dt)
 
-        # 2. Integrate positions (move balls according to their velocity)
-        for ball in active:
-            if ball.state == BallState.ROLLING:
-                ball.pos += ball.vel * dt
+        # 2. Integrate positions.  Friction above may have brought a ball to
+        #    rest, so the state is re-checked rather than trusting `moving`.
+        for ball in moving:
+            if ball.state is rolling:
+                pos = ball.pos
+                vel = ball.vel
+                pos.x += vel.x * dt
+                pos.y += vel.y * dt
 
-        # 3. Resolve all ball-ball collision pairs
-        for i in range(len(active)):
-            for j in range(i + 1, len(active)):
-                resolve_pair(
-                    active[i],
-                    active[j],
-                    first_contact_callback=self._on_ball_ball_contact,
+        # 3. Resolve ball-ball collisions for every pair containing a roller.
+        #    The pairs are still visited in the original index order: when
+        #    several balls collide in the same sub-step the resolution order
+        #    changes the outcome, so skipping work must not reorder it.
+        on_contact = self._on_ball_ball_contact
+        count = len(active)
+        for i in range(count):
+            ball_a = active[i]
+            a_rolling = ball_a.state is rolling
+            for j in range(i + 1, count):
+                ball_b = active[j]
+                if a_rolling or ball_b.state is rolling:
+                    resolve_pair(ball_a, ball_b, first_contact_callback=on_contact)
+
+        # 4. Cushion reflection and pocket detection.  A collision above can
+        #    set a previously resting ball rolling, so the set is rebuilt.
+        for ball in active:
+            if ball.state is rolling and not ball.pocketed:
+                resolve_cushions_and_pockets(
+                    ball,
+                    self.table,
+                    cushion_contact_callback=self._on_cushion_contact,
+                    pocket_callback=self._on_ball_pocketed,
                 )
-
-        # 4. Cushion reflection and pocket detection
-        for ball in active:
-            resolve_cushions_and_pockets(
-                ball,
-                self.table,
-                cushion_contact_callback=self._on_cushion_contact,
-                pocket_callback=self._on_ball_pocketed,
-            )
 
     # ------------------------------------------------------------------
     # Callbacks (invoked during sub-step)
