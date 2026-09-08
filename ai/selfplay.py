@@ -146,6 +146,51 @@ def _load_weights(path: Optional[str]) -> tuple[PolicyWeights, str]:
     return PolicyWeights.from_dict(data.get("weights", data)), str(policy_path)
 
 
+class _Tee:
+    """Print progress to the console and to a log file at the same time.
+
+    A run started by double-clicking has nowhere to look but its own window,
+    and one started overnight has nowhere to look but the log.  Writing both
+    costs nothing and serves both.
+    """
+
+    def __init__(self, path):
+        self.handle = open(path, "a", encoding="utf-8", newline="\n") if path else None
+
+    def __call__(self, line: str) -> None:
+        print(line, flush=True)
+        if self.handle:
+            self.handle.write(line + "\n")
+            self.handle.flush()
+
+    def close(self) -> None:
+        if self.handle:
+            self.handle.close()
+
+
+def next_free_seed(path: Path, fallback: int) -> int:
+    """One past the highest seed the dataset already holds.
+
+    Replaying a seed replays the whole game, so a second run starting where the
+    first one did adds duplicates rather than data.  Reading the answer off the
+    file beats remembering to bump a number by hand.
+    """
+    if not path.exists():
+        return fallback
+    highest = -1
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            start = line.find('"g":')
+            if start < 0:
+                continue
+            end = line.find(",", start)
+            try:
+                highest = max(highest, int(line[start + 4:end]))
+            except ValueError:
+                continue
+    return fallback if highest < 0 else highest + 1
+
+
 def _fmt_hms(seconds: float) -> str:
     seconds = int(max(0, seconds))
     return "%d:%02d:%02d" % (seconds // 3600, (seconds % 3600) // 60, seconds % 60)
@@ -155,11 +200,17 @@ def collect(args: argparse.Namespace) -> dict:
     weights, source = _load_weights(args.policy)
     out_path = Path(args.out)
     mode = "a" if args.append and out_path.exists() else "w"
+    say = _Tee(args.log)
+
+    if str(args.seed_start).lower() == "auto":
+        seed_start = next_free_seed(out_path, 100000) if mode == "a" else 100000
+    else:
+        seed_start = int(args.seed_start)
 
     jobs = [
         (
             weights,
-            args.seed_start + i,
+            seed_start + i,
             args.candidates,
             args.max_shots,
             args.aim_noise,
@@ -175,7 +226,7 @@ def collect(args: argparse.Namespace) -> dict:
             "candidates": args.candidates,
             "max_shots": args.max_shots,
             "aim_noise": args.aim_noise,
-            "seed_start": args.seed_start,
+            "seed_start": seed_start,
             "games_requested": args.games,
         }
     }
@@ -186,6 +237,11 @@ def collect(args: argparse.Namespace) -> dict:
     games = rows = pots = fouls = finished = 0
     shots_total = 0
     wins_to_breaker = 0
+
+    say("Policy %s, %d candidates per decision, aiming error %.4f rad."
+        % (source, args.candidates, args.aim_noise))
+    say("Seeds from %d.  %s %s.  Ctrl-C is safe - what is written stays."
+        % (seed_start, "Appending to" if mode == "a" else "Writing", out_path))
 
     handle = out_path.open(mode, encoding="utf-8", newline="\n")
     try:
@@ -219,7 +275,7 @@ def collect(args: argparse.Namespace) -> dict:
                     handle.flush()
                     elapsed = time.time() - started
                     rate = games / max(1e-9, elapsed)
-                    print(
+                    say(
                         "%6d games | %8d labelled rows | %.2f games/s | "
                         "%.1f shots/game | %.0f%% finished | breaker wins %.0f%% | "
                         "elapsed %s"
@@ -231,12 +287,11 @@ def collect(args: argparse.Namespace) -> dict:
                             100.0 * finished / max(1, games),
                             100.0 * wins_to_breaker / max(1, finished),
                             _fmt_hms(elapsed),
-                        ),
-                        flush=True,
+                        )
                     )
 
                 if deadline and time.time() >= deadline:
-                    print("stopping: --max-hours reached", flush=True)
+                    say("stopping: --max-hours reached")
                     break
         finally:
             if pool is not None:
@@ -259,7 +314,8 @@ def collect(args: argparse.Namespace) -> dict:
         "games_per_hour": games / max(1e-9, elapsed / 3600),
         "out": str(out_path),
     }
-    print(json.dumps(summary, indent=2), flush=True)
+    say(json.dumps(summary, indent=2))
+    say.close()
     return summary
 
 
@@ -272,7 +328,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--aim-noise", type=float, default=DEFAULT_AIM_NOISE)
     parser.add_argument("--policy", default="ai_policy.json")
     parser.add_argument("--out", default="selfplay.jsonl")
-    parser.add_argument("--seed-start", type=int, default=100000)
+    parser.add_argument(
+        "--seed-start",
+        default="auto",
+        help="First game seed.  'auto' continues past the highest seed the "
+             "output file already holds, so an appended run never replays a "
+             "game the file already has.",
+    )
+    parser.add_argument(
+        "--log",
+        default=None,
+        help="Append progress lines to this file as well as printing them.",
+    )
     parser.add_argument(
         "--append",
         action="store_true",
