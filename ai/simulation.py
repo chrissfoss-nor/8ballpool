@@ -424,6 +424,11 @@ class ShotRun:
         return self._finished
 
     @property
+    def balls(self) -> list[Ball]:
+        """The live balls of the shot in flight, for anything watching it."""
+        return self._balls
+
+    @property
     def frames(self) -> int:
         """Physics frames simulated so far."""
         return self._frames

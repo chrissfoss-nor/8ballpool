@@ -185,44 +185,70 @@ class AIPlayer:
         return self.start_search(snapshot).run()
 
     def score_result(self, snapshot: GameSnapshot, result: SimulationResult) -> float:
+        """What this shot is worth, all in.
+
+        The sum of the terms explain_result() lists, added in that order, so
+        the two can never disagree about what a shot scored.
+        """
+        score = 0.0
+        for _term, value in self.explain_result(snapshot, result):
+            score += value
+        return score
+
+    def explain_result(
+        self,
+        snapshot: GameSnapshot,
+        result: SimulationResult,
+    ) -> list[tuple[str, float]]:
+        """Break a shot's score into the terms that produced it.
+
+        Returns (weight name, contribution) in the order they are summed.  A
+        term is listed only when it applies, so what comes back is the actual
+        reasoning behind one shot rather than a row of zeroes -- which is what
+        ai/inspect.py exports and the shot inspector draws.
+        """
         weights = self.weights
         shot_result = result.shot_result
 
         if result.error:
-            return weights.foul_penalty * 2.0
+            return [("invalid_shot", weights.foul_penalty * 2.0)]
         if shot_result.is_loss:
-            return weights.loss_penalty
+            return [("loss_penalty", weights.loss_penalty)]
         if shot_result.is_foul:
-            return weights.foul_penalty
+            return [("foul_penalty", weights.foul_penalty)]
 
-        score = weights.legal_reward
+        terms: list[tuple[str, float]] = [("legal_reward", weights.legal_reward)]
 
         if shot_result.game_won_by_current:
-            score += weights.win_reward
+            terms.append(("win_reward", weights.win_reward))
 
         if shot_result.groups_assigned:
-            score += weights.group_assignment_reward
+            terms.append(("group_assignment_reward", weights.group_assignment_reward))
 
         if not shot_result.switch_turn:
-            score += weights.keep_turn_reward
+            terms.append(("keep_turn_reward", weights.keep_turn_reward))
 
         own_pocketed, opponent_pocketed = _count_pocketed_for_current(
             snapshot,
             shot_result,
             result.pocketed_numbers,
         )
-        score += own_pocketed * weights.own_pocket_reward
-        score += opponent_pocketed * weights.opponent_pocket_penalty
+        terms.append(("own_pocket_reward", own_pocketed * weights.own_pocket_reward))
+        terms.append(
+            ("opponent_pocket_penalty", opponent_pocketed * weights.opponent_pocket_penalty)
+        )
 
         before = target_balls_remaining(snapshot, snapshot.current_idx)
         after = target_balls_remaining(result.next_state, snapshot.current_idx)
-        score += max(0, before - after) * weights.progress_reward
+        terms.append(
+            ("progress_reward", max(0, before - after) * weights.progress_reward)
+        )
 
         cue_pos = result.next_state.active_cue_position()
         if cue_pos is not None:
             max_dist = math.hypot(TABLE_W, TABLE_H) / 2.0
             center_score = 1.0 - min(1.0, cue_pos.distance_to(self.table.center) / max_dist)
-            score += center_score * weights.cue_center_reward
+            terms.append(("cue_center_reward", center_score * weights.cue_center_reward))
 
         # Second ply: what does this shot leave behind?  The same geometry
         # filter that finds candidate shots also answers how good the table
@@ -232,12 +258,14 @@ class AIPlayer:
         if not next_state.game_over:
             leave = self.position_value(next_state)
             if shot_result.switch_turn:
-                score += leave * weights.opponent_position_penalty
+                terms.append(
+                    ("opponent_position_penalty", leave * weights.opponent_position_penalty)
+                )
             else:
-                score += leave * weights.position_reward
+                terms.append(("position_reward", leave * weights.position_reward))
 
-        score -= result.shot.clamped_power * weights.power_cost
-        return score
+        terms.append(("power_cost", -(result.shot.clamped_power * weights.power_cost)))
+        return terms
 
     def position_value(self, snapshot: GameSnapshot) -> float:
         """How promising the table is for whoever shoots next, from 0 to 1.
@@ -273,11 +301,24 @@ class AIPlayer:
         return min(1.0, best + spare)
 
     def _generate_candidates(self, snapshot: GameSnapshot) -> Iterable[Shot]:
-        """Yield candidate shots, most promising first.
+        """Yield candidate shots, most promising first."""
+        for _kind, _target, shot in self._generate_labelled_candidates(snapshot):
+            yield shot
+
+    def _generate_labelled_candidates(
+        self,
+        snapshot: GameSnapshot,
+    ) -> Iterable[tuple[str, Optional[int], Shot]]:
+        """Yield (kind, target ball, shot), most promising first.
 
         Candidates are ordered so a small simulation budget buys breadth
         rather than depth: every geometrically plausible pot gets one
         best-guess shot before any of them gets a second variation.
+
+        The kind and target are what the shot was *for* -- a direct pot at the
+        4, the same pot played with draw, a safety off the nearest legal ball.
+        The search itself ignores them and scores what the physics returns;
+        they exist so ai/inspect.py can say why each candidate was tried.
         """
         obstacles = active_obstacles(snapshot)
         placements = self._candidate_placements(snapshot, obstacles)
@@ -293,7 +334,7 @@ class AIPlayer:
                 base_angle = (rack_target - cue_pos).angle()
                 for offset in (0.0, -0.035, 0.035, -0.07, 0.07):
                     for power in (0.95, 1.0, 0.85):
-                        yield Shot(base_angle + offset, power, placement)
+                        yield "break", None, Shot(base_angle + offset, power, placement)
 
         legal_numbers = set(legal_target_numbers(snapshot))
         targets = [ball for ball in obstacles if ball[0] in legal_numbers]
@@ -324,7 +365,8 @@ class AIPlayer:
 
         # Pass 1 - one shot at every plausible pot, easiest first.
         for placement, pot in plans:
-            yield Shot(pot.aim_angle, _pot_power(pot), placement)
+            kind = "bank" if pot.is_bank else "pot"
+            yield kind, pot.target_number, Shot(pot.aim_angle, _pot_power(pot), placement)
 
         # Pass 2 - refine aim, speed and spin around those same pots, easiest
         # pot first.  Spin sits in the same block as the aim and power
@@ -333,16 +375,21 @@ class AIPlayer:
         # is worth more than a fourth aiming tweak on the fifth-easiest pot.
         for placement, pot in plans:
             base_power = _pot_power(pot)
+            target = pot.target_number
             for angle_offset in (-0.012, 0.012, -0.030, 0.030):
-                yield Shot(pot.aim_angle + angle_offset, base_power, placement)
+                yield "aim", target, Shot(
+                    pot.aim_angle + angle_offset, base_power, placement
+                )
             for power_scale in (0.80, 1.25, 1.60):
-                yield Shot(
+                yield "speed", target, Shot(
                     pot.aim_angle,
                     max(0.15, min(1.0, base_power * power_scale)),
                     placement,
                 )
             for spin_x, spin_y in self.position_spins:
-                yield Shot(pot.aim_angle, base_power, placement, spin_x, spin_y)
+                yield "spin", target, Shot(
+                    pot.aim_angle, base_power, placement, spin_x, spin_y
+                )
 
         # Pass 3 - safety.  When nothing pots, the shot still has to be legal,
         # and where it leaves the cue ball decides the next visit.  Striking a
@@ -354,6 +401,7 @@ class AIPlayer:
             if cue_pos is None:
                 continue
             for _number, tx, ty in _by_distance(targets, cue_pos)[:SAFETY_TARGETS]:
+                safety_target = _number
                 aim = Vec2(tx, ty) - cue_pos
                 distance = aim.length()
                 if distance < 1e-9:
@@ -367,14 +415,16 @@ class AIPlayer:
                 )
                 for fraction in (0.0, -0.55, 0.55, -0.85, 0.85):
                     for power in (0.28, 0.45, 0.75, 1.00):
-                        yield Shot(angle + spread * fraction, power, placement)
+                        yield "safety", safety_target, Shot(
+                            angle + spread * fraction, power, placement
+                        )
                 # Nothing pots here, so the whole budget is on this pass and
                 # the tip is worth spending some of it on: a safety lives or
                 # dies on where the cue ball stops.
                 for fraction in (0.0, -0.55, 0.55, -0.85, 0.85):
                     for power in (0.28, 0.45, 0.75, 1.00):
                         for spin_x, spin_y in self.safety_spins:
-                            yield Shot(
+                            yield "safety-spin", safety_target, Shot(
                                 angle + spread * fraction,
                                 power,
                                 placement,
@@ -385,7 +435,7 @@ class AIPlayer:
         # Pass 4 - last resort, random probing.
         while True:
             placement = self.rng.choice(placements)
-            yield Shot(
+            yield "probe", None, Shot(
                 self.rng.uniform(-math.pi, math.pi),
                 self.rng.uniform(0.20, 1.0),
                 placement,

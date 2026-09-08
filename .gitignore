@@ -59,5 +59,8 @@ htmlcov/
 # Local AI training artifacts
 ai_policy*.json
 
+# Decision export - regenerate with `python -m ai.inspect`
+ai_decisions.json
+
 # Training run output
 train_overnight.log
